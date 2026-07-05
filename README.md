@@ -1,143 +1,253 @@
-# Sample GenLayer project
+# FactVerifier — Cross-Source Fact Verification Oracle
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/license/mit/)
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/8Jm4v89VAu)
 [![Telegram](https://img.shields.io/badge/Telegram--T.svg?style=social&logo=telegram)](https://t.me/genlayer)
 [![Twitter](https://img.shields.io/twitter/url/https/twitter.com/yeagerai.svg?style=social&label=Follow%20%40GenLayer)](https://x.com/GenLayer)
-[![GitHub star chart](https://img.shields.io/github/stars/yeagerai/genlayer-project-boilerplate?style=social)](https://star-history.com/#yeagerai/genlayer-js)
 
-## About
-This project includes the boilerplate code for a GenLayer use case implementation, specifically a football bets game.
+A production-quality GenLayer Intelligent Contract that verifies factual claims by aggregating evidence from multiple independent web sources and reaching AI-powered consensus. Built as a reusable oracle primitive that other contracts and applications can integrate.
 
-## What's included
-- An example intelligent contract (Football Bets) with web access and LLM integration
-- **Direct mode tests** — fast, in-memory unit tests with web/LLM mocking (~ms per test)
-- **Integration tests** — full end-to-end tests against GenLayer Studio
-- **Contract linting** — static analysis to catch common contract issues before deployment
-- **CI pipeline** — GitHub Actions workflow for linting and direct tests
-- A production-ready Next.js 15 frontend with TypeScript, TanStack Query, and Radix UI
-- Configuration file template and deployment scripts
+## Why GenLayer?
 
-## Requirements
-- Python >= 3.12
-- [GenLayer CLI](https://github.com/genlayerlabs/genlayer-cli) globally installed: `npm install -g genlayer`
-- GenLayer Studio (for integration tests and deployment): Install from [Docs](https://docs.genlayer.com/developers/intelligent-contracts/tooling-setup#using-the-genlayer-studio) or use the hosted [GenLayer Studio](https://studio.genlayer.com/)
+Traditional smart contracts cannot access the web or reason about natural language. GenLayer changes this:
+
+| Capability | Traditional Smart Contracts | GenLayer + FactVerifier |
+|---|---|---|
+| Web access | Not possible | Fetches and renders web pages natively |
+| Natural language reasoning | Not possible | LLM-powered evidence analysis |
+| Consensus on subjective data | Not possible | Semantic equivalence principle |
+| Oracle feeds | Requires external oracle networks | Built-in, decentralized |
+
+FactVerifier demonstrates all of these in a single, reusable contract.
+
+## How It Works
+
+```
+User submits:  "The Eiffel Tower is in Paris"
+               + [reuters.com/article, wikipedia.org/Eiffel_Tower]
+
+    ┌──────────────────────────────────────┐
+    │         Input Validation             │
+    │  • Length checks                     │
+    │  • URL format & domain dedup         │
+    │  • Prompt injection detection        │
+    └──────────────┬───────────────────────┘
+                   ▼
+    ┌──────────────────────────────────────┐
+    │   Per-Source Analysis (× N sources)  │
+    │                                      │
+    │  Leader:    fetch URL → LLM analyze  │
+    │  Validator: fetch URL → LLM analyze  │
+    │                                      │
+    │  gl.eq_principle.prompt_comparative  │
+    │  ensures semantic consensus          │
+    └──────────────┬───────────────────────┘
+                   ▼
+    ┌──────────────────────────────────────┐
+    │       Consensus Aggregation          │
+    │                                      │
+    │  Confidence-weighted scoring:        │
+    │  • ≥70 → verified                   │
+    │  • ≤30 → refuted                    │
+    │  • 31-69 → disputed                 │
+    │  • No data → insufficient_sources   │
+    └──────────────┬───────────────────────┘
+                   ▼
+    On-chain result with full audit trail
+```
 
 ## Project Structure
 
 ```
-contracts/              # Python intelligent contracts
+contracts/
+  fact_verifier.py          # Main intelligent contract
+  football_bets.py          # Example contract (from boilerplate)
 tests/
-  direct/               # Fast in-memory tests (no Studio required)
-    test_create_bet.py   # Bet creation logic
-    test_resolve_bet.py  # Bet resolution with web/LLM mocks
-    test_views.py        # Read-only view methods
-  integration/           # Full tests against GenLayer Studio
+  direct/                   # Fast in-memory tests (no Studio required)
+    test_fact_verifier.py   # 40+ test cases
+    test_create_bet.py
+    test_resolve_bet.py
+    test_views.py
+    test_patterns.py
+  integration/              # Full tests against GenLayer Studio
+    test_fact_verifier.py
     test_football_bets.py
-    fixtures.py          # Expected state fixtures
-frontend/               # Next.js 15 app (TypeScript, TanStack Query, Radix UI)
-deploy/                 # TypeScript deployment scripts
-gltest.config.yaml      # Test runner network configuration
-pyproject.toml          # Python/pytest configuration
-.github/workflows/      # CI pipeline
+docs/
+  architecture.md           # System architecture and state model
+  consensus-design.md       # Consensus mechanism deep dive
+  security.md               # Security considerations and threat model
+examples/
+  basic_verification.py     # Simple verification workflow
+  multi_claim_batch.py      # Batch verification and integration patterns
+deploy/
+  deployFactVerifier.ts     # Deployment script for FactVerifier
+  deployScript.ts           # Deployment script for FootballBets
+frontend/                   # Next.js 15 app (from boilerplate)
 ```
 
 ## Quick Start
 
 ### 1. Set up Python environment
 
-```shell
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Lint your contracts
+### 2. Lint the contract
 
-Run the GenVM linter to catch issues before deployment:
-
-```shell
-genvm-lint check contracts/football_bets.py
+```bash
+genvm-lint check contracts/fact_verifier.py
 ```
-
-The linter catches:
-- Forbidden imports and non-deterministic calls
-- Invalid storage types (must use `TreeMap`, `DynArray`, `u256`, etc.)
-- Missing decorators and return type annotations
-- Non-deterministic operations outside equivalence principle blocks
-- And [20+ other rules](https://github.com/genlayerlabs/genvm-linter)
 
 ### 3. Run direct mode tests
 
-Direct mode tests run contracts in-memory without needing GenLayer Studio. They use mocks for web requests and LLM calls, giving you fast feedback (~milliseconds per test):
-
-```shell
-pytest tests/direct/ -v
+```bash
+pytest tests/direct/test_fact_verifier.py -v
 ```
 
-Direct mode features used in these tests:
-- `direct_deploy("contracts/file.py")` — deploy contract in memory
-- `direct_vm.sender = address` — set transaction sender
-- `direct_vm.mock_web(pattern, response)` — mock HTTP/render calls
-- `direct_vm.mock_llm(pattern, response)` — mock LLM responses
-- `direct_vm.expect_revert("message")` — assert expected failures
-- `direct_vm.clear_mocks()` — reset mocks between calls
+### 4. Deploy to GenLayer Testnet
 
-### 4. Deploy the contract
-
-1. Choose your network: `genlayer network`
-2. Deploy: `genlayer deploy` (runs the script in `/deploy/deployScript.ts`)
+```bash
+genlayer network          # Select testnet
+genlayer deploy           # Deploy using deploy/deployFactVerifier.ts
+```
 
 ### 5. Run integration tests
 
-Integration tests deploy the contract to GenLayer Studio and test with real consensus:
-
-```shell
-gltest tests/integration/ -v -s
+```bash
+gltest tests/integration/test_fact_verifier.py -v -s
 ```
 
-These require GenLayer Studio running (local or hosted).
+## Contract API
 
-### 6. Set up the frontend
+### Write Methods
 
-1. Copy `frontend/.env.example` to `frontend/.env`
-2. Add your deployed contract address as `NEXT_PUBLIC_CONTRACT_ADDRESS`
-3. Run:
+#### `submit_claim(claim, source_urls, category, context) → str`
 
-```shell
-cd frontend
-npm install
-npm run dev
-```
+Submit a factual claim for verification.
 
-The app will be available at http://localhost:3000/.
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| claim | str | The factual claim to verify (max 1000 chars) |
+| source_urls | list | 2-5 independent source URLs (different domains) |
+| category | str | Classification (e.g., "science", "geography") |
+| context | str | Additional context for analysis (max 500 chars) |
 
-## How the Football Bets Contract Works
+Returns the claim ID (e.g., `"claim_1"`).
 
-1. **Creating Bets**: Users bet on a football match by providing the game date, teams, and predicted winner.
-2. **Resolving Bets**: After the match, the contract fetches results from BBC Sport, uses an LLM to extract the score, and validates via the equivalence principle.
-3. **Points**: Correct predictions earn points. Users can query their points or the leaderboard.
+#### `dispute_claim(claim_id, dispute_source_urls)`
+
+Challenge a verified or refuted claim with new sources.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| claim_id | str | ID of the claim to dispute |
+| dispute_source_urls | list | 2-5 new source URLs as counter-evidence |
+
+### View Methods
+
+#### `get_claim(claim_id) → dict`
+
+Returns the full verification result including all source analyses.
+
+#### `get_claim_status(claim_id) → str`
+
+Returns just the status: `"verified"`, `"refuted"`, `"disputed"`, or `"insufficient_sources"`.
+
+#### `is_claim_verified(claim_id) → bool`
+
+Convenience method. Returns `True` only if status is `"verified"`.
+
+#### `get_claims_by_submitter(submitter_address) → list`
+
+Returns all claim IDs submitted by an address.
+
+#### `get_stats() → dict`
+
+Returns `{"total_claims": int, "total_verified": int, "total_refuted": int}`.
+
+## Consensus Design
+
+The contract uses **semantic equivalence** via `gl.eq_principle.prompt_comparative`. When analyzing a source:
+
+1. The **leader node** fetches the web page, sends it to the LLM with a structured prompt, and extracts `{supports_claim, confidence, evidence, reasoning}`
+2. **Validator nodes** independently perform the same analysis
+3. Consensus is reached if validators produce semantically equivalent conclusions — the same boolean verdict and confidence within tolerance
+
+This means:
+- Leader: `"supports_claim": true, "confidence": 85`
+- Validator: `"supports_claim": true, "confidence": 78`
+- **Consensus reached** — same conclusion, confidence within range
+
+See [docs/consensus-design.md](docs/consensus-design.md) for the full design rationale.
+
+## Security
+
+- **Input validation**: Length bounds, URL format checks, domain deduplication
+- **Prompt injection detection**: Blocklist of known injection patterns
+- **LLM output normalization**: JSON fence stripping, confidence clamping, boolean coercion
+- **Low-confidence exclusion**: Sources below 10% confidence don't influence the verdict
+- **Weighted scoring**: High-confidence sources have proportionally more influence
+
+See [docs/security.md](docs/security.md) for the complete threat model.
 
 ## Testing Strategy
 
-| Test Type | Command | Speed | Requires Studio |
-|-----------|---------|-------|-----------------|
-| **Lint** | `genvm-lint check contracts/*.py` | ~250ms | No |
-| **Direct** | `pytest tests/direct/ -v` | ~ms/test | No |
-| **Integration** | `gltest tests/integration/ -v -s` | ~min/test | Yes |
+| Test Type | Command | Tests | Speed |
+|-----------|---------|-------|-------|
+| Lint | `genvm-lint check contracts/fact_verifier.py` | Static analysis | ~250ms |
+| Direct | `pytest tests/direct/test_fact_verifier.py -v` | 40+ unit tests | ~ms/test |
+| Integration | `gltest tests/integration/test_fact_verifier.py -v -s` | 5 e2e tests | ~min/test |
 
-**Recommended workflow:**
-1. Lint after every contract change
-2. Run direct tests frequently during development
-3. Run integration tests before deployment to verify consensus behavior
+Test coverage includes:
+- Input validation (empty, too long, malformed)
+- Prompt injection detection
+- Verified/refuted/disputed/insufficient outcomes
+- Multi-source consensus
+- Confidence clamping and normalization
+- Multi-user claim submission
+- Dispute mechanism
+- Edge cases (max lengths, malformed LLM output)
 
-For AI coding agents (Claude Code, Cursor, etc.), the linter and direct tests provide the fast feedback loop needed for iterative development without requiring a running Studio instance.
+## Integration Patterns
 
-## Community
-- **[Discord](https://discord.gg/8Jm4v89VAu)**: Discussions, support, and announcements
-- **[Telegram](https://t.me/genlayer)**: Informal chats and quick updates
+FactVerifier is designed as a **reusable primitive**. Other contracts can call it to verify claims before executing actions:
+
+```python
+# DAO governance: verify a claim before executing a proposal
+if fact_verifier.is_claim_verified(claim_id):
+    dao.execute_proposal(proposal_id)
+
+# News aggregation: filter verified articles
+for article in articles:
+    claim_id = fact_verifier.submit_claim(article.headline, article.sources, ...)
+    if fact_verifier.is_claim_verified(claim_id):
+        publish(article)
+```
+
+See [examples/](examples/) for complete usage patterns.
+
+## Requirements
+
+- Python >= 3.12
+- [GenLayer CLI](https://github.com/genlayerlabs/genlayer-cli): `npm install -g genlayer`
+- GenLayer Studio (for integration tests): [Docs](https://docs.genlayer.com/developers/intelligent-contracts/tooling-setup)
 
 ## Documentation
-For detailed information, see our [documentation](https://docs.genlayer.com/).
+
+- [Architecture](docs/architecture.md) — System design, state model, verification flow
+- [Consensus Design](docs/consensus-design.md) — Why and how consensus works
+- [Security](docs/security.md) — Threat model and mitigations
+- [GenLayer Docs](https://docs.genlayer.com/) — Full GenLayer documentation
+- [SDK API Reference](https://sdk.genlayer.com/main/_static/ai/api.txt) — Complete SDK API
+
+## Community
+
+- [Discord](https://discord.gg/8Jm4v89VAu) — Discussions, support, announcements
+- [Telegram](https://t.me/genlayer) — Informal chats and quick updates
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+MIT — see [LICENSE](LICENSE) for details.
