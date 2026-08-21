@@ -7,6 +7,8 @@
 
 A production-quality GenLayer Intelligent Contract that verifies factual claims by aggregating evidence from multiple independent web sources and reaching AI-powered consensus. Built as a reusable oracle primitive that other contracts and applications can integrate.
 
+It is backed by an **economic staking layer**: submitting a claim and challenging one both require locking native GEN, and the party consensus sides with is rewarded from the other's stake (minus a small protocol fee). This gives the oracle skin-in-the-game spam resistance and a sustainable fee model. See [docs/economic-security.md](docs/economic-security.md) and [MILESTONE.md](MILESTONE.md).
+
 ## Why GenLayer?
 
 Traditional smart contracts cannot access the web or reason about natural language. GenLayer changes this:
@@ -64,17 +66,19 @@ contracts/
   football_bets.py          # Example contract (from boilerplate)
 tests/
   direct/                   # Fast in-memory tests (no Studio required)
-    test_fact_verifier.py   # 40+ test cases
+    test_fact_verifier.py   # 49 verification + validation test cases
+    test_staking.py         # 28 economic-layer test cases (stakes, disputes, payouts)
     test_create_bet.py
     test_resolve_bet.py
     test_views.py
     test_patterns.py
   integration/              # Full tests against GenLayer Studio
-    test_fact_verifier.py
+    test_fact_verifier.py   # 8 e2e tests incl. finalize/withdraw and dispute settlement
     test_football_bets.py
 docs/
   architecture.md           # System architecture and state model
   consensus-design.md       # Consensus mechanism deep dive
+  economic-security.md      # Staking, dispute settlement, and payout design
   security.md               # Security considerations and threat model
 examples/
   basic_verification.py     # Simple verification workflow
@@ -83,6 +87,7 @@ deploy/
   deployFactVerifier.ts     # Deployment script for FactVerifier
   deployScript.ts           # Deployment script for FootballBets
 frontend/                   # Next.js 15 app (from boilerplate)
+MILESTONE.md                # What changed since the accepted version, and why
 ```
 
 ## Quick Start
@@ -124,9 +129,11 @@ gltest tests/integration/test_fact_verifier.py -v -s
 
 ### Write Methods
 
-#### `submit_claim(claim, source_urls, category, context) → str`
+#### `submit_claim(claim, source_urls, category, context) → str`  *(payable)*
 
-Submit a factual claim for verification.
+Submit a factual claim for verification. **Requires a stake** of at least
+`MIN_SUBMISSION_STAKE` (0.01 GEN) sent as the call value; the stake is locked
+until the claim is finalized or a dispute settles it.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -134,23 +141,46 @@ Submit a factual claim for verification.
 | source_urls | list | 2-5 independent source URLs (different domains) |
 | category | str | Classification (e.g., "science", "geography") |
 | context | str | Additional context for analysis (max 500 chars) |
+| *value* | GEN | Stake ≥ 0.01 GEN (sent as native value, not an argument) |
 
-Returns the claim ID (e.g., `"claim_1"`).
+Returns the claim ID (e.g., `"claim_1"`). Input validation runs *before* the
+stake check, so malformed claims are rejected regardless of the value sent.
 
-#### `dispute_claim(claim_id, dispute_source_urls)`
+#### `dispute_claim(claim_id, dispute_source_urls)`  *(payable)*
 
-Challenge a verified or refuted claim with new sources.
+Challenge a verified or refuted claim with new sources. **Requires a challenge
+stake** of at least the original submission stake. Consensus is re-run over the
+combined sources; if the verdict flips the challenger wins, otherwise the
+submitter wins. The winner's payout (own stake + loser's stake − fee) is credited
+to the pull-payment ledger and the fee goes to the treasury. Settles the claim.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | claim_id | str | ID of the claim to dispute |
 | dispute_source_urls | list | 2-5 new source URLs as counter-evidence |
+| *value* | GEN | Challenge stake ≥ the submission stake |
+
+#### `finalize_claim(claim_id)`
+
+Submitter-only. Closes an unchallenged claim and credits the submitter's stake
+back to their withdrawable balance. Reverts if the claim is already resolved.
+
+#### `withdraw()`
+
+Withdraw the caller's accumulated balance (dispute winnings and/or finalized
+stakes). Uses checks-effects-interactions: the ledger is zeroed before the
+native transfer is emitted.
+
+#### `withdraw_treasury()`
+
+Owner-only. Transfers accumulated protocol fees to the owner (the deployer).
 
 ### View Methods
 
 #### `get_claim(claim_id) → dict`
 
-Returns the full verification result including all source analyses.
+Returns the full verification result including all source analyses. (Backward
+compatible — economic fields live in `get_stake_info`.)
 
 #### `get_claim_status(claim_id) → str`
 
@@ -164,9 +194,25 @@ Convenience method. Returns `True` only if status is `"verified"`.
 
 Returns all claim IDs submitted by an address.
 
+#### `get_stake_info(claim_id) → dict`
+
+Returns the claim's economic state: `{stake, challenger, challenge_stake, resolved, winner, status}`.
+
+#### `get_claimable(address) → int`
+
+Returns the address's withdrawable balance (native units).
+
+#### `get_treasury() → int`
+
+Returns accumulated protocol fees (native units).
+
+#### `get_owner() → str`
+
+Returns the owner address (the deployer, who can withdraw the treasury).
+
 #### `get_stats() → dict`
 
-Returns `{"total_claims": int, "total_verified": int, "total_refuted": int}`.
+Returns `{"total_claims", "total_verified", "total_refuted", "total_disputes", "total_staked", "treasury"}` (all int).
 
 ## Consensus Design
 
@@ -193,13 +239,37 @@ See [docs/consensus-design.md](docs/consensus-design.md) for the full design rat
 
 See [docs/security.md](docs/security.md) for the complete threat model.
 
+## Economic Security
+
+Verification alone is advisory — anyone could spam claims or file frivolous
+disputes for free. The economic layer attaches a cost to being wrong:
+
+| Mechanism | Effect |
+|-----------|--------|
+| **Submission stake** (≥ 0.01 GEN) | Spamming claims locks capital per claim |
+| **Challenge stake** (≥ submission stake) | Frivolous disputes risk the challenger's own stake |
+| **Winner takes loser's stake** | Being right is rewarded; being wrong is slashed |
+| **5% protocol fee** | Funds a sustainable treasury from the loser's stake |
+| **Pull-payment ledger** | Winners `withdraw()`; settlement never pushes transfers |
+
+**Settlement (per dispute):** re-run consensus over original + new sources. If
+the verdict flips, the challenger wins; otherwise the submitter wins. The winner
+is credited `own_stake + (loser_stake − fee)`; the treasury takes `fee`. Value is
+conserved: `winner_payout + fee == submission_stake + challenge_stake`.
+
+An unchallenged claim's submitter can `finalize_claim()` to reclaim their stake.
+All accounting is deterministic and unit-tested; see
+[docs/economic-security.md](docs/economic-security.md) for the full design,
+worked examples, and known limitations.
+
 ## Testing Strategy
 
 | Test Type | Command | Tests | Speed |
 |-----------|---------|-------|-------|
 | Lint | `genvm-lint check contracts/fact_verifier.py` | Static analysis | ~250ms |
-| Direct | `pytest tests/direct/test_fact_verifier.py -v` | 40+ unit tests | ~ms/test |
-| Integration | `gltest tests/integration/test_fact_verifier.py -v -s` | 5 e2e tests | ~min/test |
+| Direct (core) | `pytest tests/direct/test_fact_verifier.py -v` | 49 unit tests | ~ms/test |
+| Direct (economic) | `pytest tests/direct/test_staking.py -v` | 28 unit tests | ~ms/test |
+| Integration | `gltest tests/integration/test_fact_verifier.py -v -s` | 8 e2e tests | ~min/test |
 
 Test coverage includes:
 - Input validation (empty, too long, malformed)
@@ -208,7 +278,10 @@ Test coverage includes:
 - Multi-source consensus
 - Confidence clamping and normalization
 - Multi-user claim submission
-- Dispute mechanism
+- Dispute mechanism and stake settlement (challenger/submitter wins)
+- Submission & challenge stake requirements
+- Finalization, pull-payment withdrawal, treasury (owner-only)
+- Value conservation across settlement
 - Edge cases (max lengths, malformed LLM output)
 
 ## Integration Patterns
@@ -239,7 +312,9 @@ See [examples/](examples/) for complete usage patterns.
 
 - [Architecture](docs/architecture.md) — System design, state model, verification flow
 - [Consensus Design](docs/consensus-design.md) — Why and how consensus works
+- [Economic Security](docs/economic-security.md) — Staking, dispute settlement, payouts
 - [Security](docs/security.md) — Threat model and mitigations
+- [Milestone](MILESTONE.md) — What changed since the accepted version, and why
 - [GenLayer Docs](https://docs.genlayer.com/) — Full GenLayer documentation
 - [SDK API Reference](https://sdk.genlayer.com/main/_static/ai/api.txt) — Complete SDK API
 

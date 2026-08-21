@@ -22,6 +22,21 @@ MAX_CONTEXT_LENGTH = 500
 MAX_CATEGORY_LENGTH = 100
 
 
+# ── Economic staking parameters ───────────────────────────────────────────────
+#
+# The oracle is backed by an economic security layer: submitting a claim requires
+# locking a stake, and challenging one requires matching it. The party the
+# re-run consensus sides with recovers their own stake and takes the loser's
+# stake minus a protocol fee. This makes spamming false claims and frivolous
+# challenges costly, while honest participation is (fee aside) capital-preserving.
+#
+# Values are in the native token's smallest unit (1 GEN = 10**18).
+
+MIN_SUBMISSION_STAKE = 10**16      # 0.01 GEN — minimum to submit a claim
+PROTOCOL_FEE_BPS = 500             # 5% fee, taken from the loser's forfeited stake
+BPS_DENOMINATOR = 10000
+
+
 # ── Storage data types ───────────────────────────────────────────────────────
 
 @allow_storage
@@ -48,6 +63,12 @@ class VerificationResult:
     sources_refuting: u256
     final_reasoning: str
     source_results_json: str
+    # ── Economic layer ──
+    stake: u256              # native tokens locked by the submitter
+    challenger: str          # hex address of the challenger ("" if never disputed)
+    challenge_stake: u256    # native tokens locked by the challenger
+    resolved: bool           # True once stakes have been settled (win/refund)
+    winner: str              # hex address that recovered the stakes ("" until resolved)
 
 
 class FactVerifier(gl.Contract):
@@ -56,11 +77,21 @@ class FactVerifier(gl.Contract):
     claim_counter: u256
     total_verified: u256
     total_refuted: u256
+    # ── Economic layer ──
+    claimable: TreeMap[Address, u256]  # pull-payment ledger: withdrawable balances
+    owner: Address                     # receives accumulated protocol fees
+    treasury: u256                     # accumulated protocol fees (native tokens)
+    total_staked: u256                 # native tokens currently locked in open claims
+    total_disputes: u256               # lifetime number of disputes raised
 
     def __init__(self):
         self.claim_counter = u256(0)
         self.total_verified = u256(0)
         self.total_refuted = u256(0)
+        self.owner = gl.message.sender_address
+        self.treasury = u256(0)
+        self.total_staked = u256(0)
+        self.total_disputes = u256(0)
 
     # ── Internal: input validation ───────────────────────────────────────
 
@@ -224,7 +255,7 @@ Rules:
 
     # ── Public write methods ─────────────────────────────────────────────
 
-    @gl.public.write
+    @gl.public.write.payable
     def submit_claim(
         self,
         claim: str,
@@ -238,6 +269,12 @@ Rules:
 
         if context and len(context) > MAX_CONTEXT_LENGTH:
             raise gl.vm.UserError(f"Context exceeds maximum length of {MAX_CONTEXT_LENGTH}")
+
+        stake = int(gl.message.value)
+        if stake < MIN_SUBMISSION_STAKE:
+            raise gl.vm.UserError(
+                f"Submission requires a stake of at least {MIN_SUBMISSION_STAKE}"
+            )
 
         submitter = gl.message.sender_address
 
@@ -286,9 +323,15 @@ Rules:
             sources_refuting=u256(aggregation["sources_refuting"]),
             final_reasoning=final_reasoning,
             source_results_json=json.dumps(source_results_data, sort_keys=True),
+            stake=u256(stake),
+            challenger="",
+            challenge_stake=u256(0),
+            resolved=False,
+            winner="",
         )
 
         self.claims[claim_id] = result
+        self.total_staked = u256(int(self.total_staked) + stake)
 
         existing = self.claim_ids_by_submitter.get(submitter, "")
         if existing:
@@ -300,17 +343,28 @@ Rules:
 
         return claim_id
 
-    @gl.public.write
+    @gl.public.write.payable
     def dispute_claim(self, claim_id: str, dispute_source_urls: list) -> None:
         if claim_id not in self.claims:
             raise gl.vm.UserError("Claim not found")
 
         claim_record = self.claims[claim_id]
 
+        if claim_record.resolved:
+            raise gl.vm.UserError("Claim already resolved")
+
         if claim_record.status not in (STATUS_VERIFIED, STATUS_REFUTED):
             raise gl.vm.UserError("Only verified or refuted claims can be disputed")
 
         self._validate_sources(dispute_source_urls)
+
+        challenger = gl.message.sender_address
+        challenge = int(gl.message.value)
+        submitter_stake = int(claim_record.stake)
+        if challenge < submitter_stake:
+            raise gl.vm.UserError(
+                f"Challenge stake must be at least the submission stake ({submitter_stake})"
+            )
 
         claim_text = claim_record.claim_text
         new_analyses = []
@@ -373,6 +427,86 @@ Rules:
             )
         claim_record.final_reasoning = "; ".join(reasoning_parts)
 
+        # ── Settle stakes ────────────────────────────────────────────────
+        # A dispute "succeeds" when re-running consensus flips the verdict.
+        # The winner recovers their own stake and takes the loser's stake
+        # minus the protocol fee. Payouts go to the pull-payment ledger so
+        # this method performs no external transfer (see withdraw()).
+        dispute_succeeds = new_status != old_status
+        if dispute_succeeds:
+            winner_addr = challenger
+            fee = submitter_stake * PROTOCOL_FEE_BPS // BPS_DENOMINATOR
+            payout = challenge + (submitter_stake - fee)
+        else:
+            winner_addr = Address(claim_record.submitter)
+            fee = challenge * PROTOCOL_FEE_BPS // BPS_DENOMINATOR
+            payout = submitter_stake + (challenge - fee)
+
+        prev_claimable = int(self.claimable.get(winner_addr, u256(0)))
+        self.claimable[winner_addr] = u256(prev_claimable + payout)
+        self.treasury = u256(int(self.treasury) + fee)
+        self.total_staked = u256(max(0, int(self.total_staked) - submitter_stake))
+
+        claim_record.challenger = challenger.as_hex
+        claim_record.challenge_stake = u256(challenge)
+        claim_record.resolved = True
+        claim_record.winner = winner_addr.as_hex
+        self.total_disputes = u256(int(self.total_disputes) + 1)
+
+    @gl.public.write
+    def finalize_claim(self, claim_id: str) -> None:
+        """Close an unchallenged claim and return the submitter's stake.
+
+        Only the submitter may finalize, and only while the claim is still
+        open (not resolved). This releases locked capital once the submitter
+        is confident no challenge is coming. Note: without on-chain block
+        time the SDK cannot enforce a mandatory challenge window, so this is
+        a submitter-initiated settlement rather than a timelocked one.
+        """
+        if claim_id not in self.claims:
+            raise gl.vm.UserError("Claim not found")
+
+        claim_record = self.claims[claim_id]
+        if claim_record.resolved:
+            raise gl.vm.UserError("Claim already resolved")
+
+        submitter_addr = Address(claim_record.submitter)
+        if gl.message.sender_address.as_hex != claim_record.submitter:
+            raise gl.vm.UserError("Only the submitter can finalize this claim")
+
+        stake_amount = int(claim_record.stake)
+        prev_claimable = int(self.claimable.get(submitter_addr, u256(0)))
+        self.claimable[submitter_addr] = u256(prev_claimable + stake_amount)
+        self.total_staked = u256(max(0, int(self.total_staked) - stake_amount))
+
+        claim_record.resolved = True
+        claim_record.winner = claim_record.submitter
+
+    @gl.public.write
+    def withdraw(self) -> None:
+        """Withdraw the caller's accumulated balance (pull-payment)."""
+        sender = gl.message.sender_address
+        amount = int(self.claimable.get(sender, u256(0)))
+        if amount <= 0:
+            raise gl.vm.UserError("Nothing to withdraw")
+
+        # Checks-effects-interactions: zero the ledger before transferring.
+        self.claimable[sender] = u256(0)
+        gl.get_contract_at(sender).emit_transfer(value=u256(amount))
+
+    @gl.public.write
+    def withdraw_treasury(self) -> None:
+        """Owner-only withdrawal of accumulated protocol fees."""
+        if gl.message.sender_address.as_hex != self.owner.as_hex:
+            raise gl.vm.UserError("Only the owner can withdraw the treasury")
+
+        amount = int(self.treasury)
+        if amount <= 0:
+            raise gl.vm.UserError("Treasury is empty")
+
+        self.treasury = u256(0)
+        gl.get_contract_at(self.owner).emit_transfer(value=u256(amount))
+
     # ── Public view methods ──────────────────────────────────────────────
 
     @gl.public.view
@@ -414,7 +548,37 @@ Rules:
             "total_claims": int(self.claim_counter),
             "total_verified": int(self.total_verified),
             "total_refuted": int(self.total_refuted),
+            "total_disputes": int(self.total_disputes),
+            "total_staked": int(self.total_staked),
+            "treasury": int(self.treasury),
         }
+
+    @gl.public.view
+    def get_stake_info(self, claim_id: str) -> dict:
+        if claim_id not in self.claims:
+            raise gl.vm.UserError("Claim not found")
+        c = self.claims[claim_id]
+        return {
+            "stake": int(c.stake),
+            "challenger": c.challenger,
+            "challenge_stake": int(c.challenge_stake),
+            "resolved": c.resolved,
+            "winner": c.winner,
+            "status": c.status,
+        }
+
+    @gl.public.view
+    def get_claimable(self, address: str) -> int:
+        addr = Address(address)
+        return int(self.claimable.get(addr, u256(0)))
+
+    @gl.public.view
+    def get_treasury(self) -> int:
+        return int(self.treasury)
+
+    @gl.public.view
+    def get_owner(self) -> str:
+        return self.owner.as_hex
 
     @gl.public.view
     def is_claim_verified(self, claim_id: str) -> bool:

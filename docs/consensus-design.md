@@ -77,14 +77,27 @@ A high-confidence supporting source counts more than a low-confidence one. This 
 
 ## Dispute Mechanism
 
-Any user can dispute a verified or refuted claim by providing new source URLs. The dispute process:
+Any user can dispute a verified or refuted claim by providing new source URLs.
+Disputes are **economically staked** — the challenger must lock at least the
+submitter's original stake (see [economic-security.md](economic-security.md)).
+The dispute process:
 
-1. New sources are analyzed with the same consensus mechanism
-2. Results are combined with the original source analyses
-3. The aggregation is recalculated over all sources (original + dispute)
-4. Status may change based on the new aggregate score
+1. The challenge stake is checked (must be ≥ the submission stake)
+2. New sources are analyzed with the same consensus mechanism
+3. Results are combined with the original source analyses
+4. The aggregation is recalculated over all sources (original + dispute)
+5. Status may change based on the new aggregate score
+6. **Settlement:** if the verdict flipped, the dispute *succeeds* and the
+   challenger wins; if it held, the submitter wins. The winner is credited their
+   own stake plus the loser's stake minus a 5% protocol fee, and the claim is
+   marked `resolved` (it can never be disputed again)
 
-This creates an open, adversarial verification system where claims can be challenged with new evidence.
+This creates an open, adversarial verification system where claims can be
+challenged with new evidence — and where challenging is only rational when the
+challenger genuinely expects the verdict to flip, because being wrong forfeits
+their stake. Note the settlement is a **deterministic** step run *after* the
+non-deterministic consensus block returns, so it never introduces
+non-determinism into validation.
 
 ## Design Decisions
 

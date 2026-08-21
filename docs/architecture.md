@@ -28,9 +28,33 @@ The FactVerifier is a cross-source fact verification oracle built as a GenLayer 
 │  │  claim_ids_by_submitter: TreeMap[Address, str]  │ │
 │  │  claim_counter: u256                            │ │
 │  │  total_verified / total_refuted: u256           │ │
+│  │  ── economic layer ──                           │ │
+│  │  claimable: TreeMap[Address, u256]              │ │
+│  │  owner: Address                                 │ │
+│  │  treasury / total_staked / total_disputes: u256 │ │
 │  └────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────┘
 ```
+
+## Economic Layer
+
+Layered on top of verification is an economic settlement engine (see
+[economic-security.md](economic-security.md) for the full design):
+
+```
+┌──────────────┐   stake locked   ┌──────────────┐   payout credited   ┌──────────────┐
+│ submit_claim │ ───────────────▶ │  settlement  │ ──────────────────▶ │  claimable   │
+│  (payable)   │                  │  (dispute /  │                     │  ledger      │
+│ dispute_claim│ ───────────────▶ │  finalize)   │   fee → treasury    │ (pull only)  │
+│  (payable)   │                  └──────────────┘                     └──────┬───────┘
+└──────────────┘                                                              │ withdraw()
+                                                                              ▼
+                                                                     native emit_transfer
+```
+
+Settlement is fully deterministic — it runs *after* the non-deterministic
+consensus block completes, credits an internal ledger rather than pushing
+transfers, and conserves value (`winner_payout + fee == submission + challenge`).
 
 ## Verification Flow
 
@@ -78,6 +102,11 @@ The FactVerifier is a cross-source fact verification oracle built as a GenLayer 
 | sources_refuting | u256 | Count of refuting sources |
 | final_reasoning | str | Aggregated reasoning summary |
 | source_results_json | str | JSON array of per-source analysis details |
+| stake | u256 | Native tokens locked by the submitter |
+| challenger | str | Hex address of the challenger (`""` if never disputed) |
+| challenge_stake | u256 | Native tokens locked by the challenger |
+| resolved | bool | `True` once the stakes have been settled |
+| winner | str | Hex address that recovered the stakes (`""` until resolved) |
 
 ### Storage Layout
 
@@ -85,6 +114,11 @@ The FactVerifier is a cross-source fact verification oracle built as a GenLayer 
 - `claim_ids_by_submitter`: Index mapping submitter addresses to their claim IDs (stored as JSON array in string)
 - `claim_counter`: Monotonically increasing claim ID counter
 - `total_verified` / `total_refuted`: Global statistics counters
+- `claimable`: Pull-payment ledger of withdrawable balances, keyed by address
+- `owner`: Deployer address; the only account that can withdraw the treasury
+- `treasury`: Accumulated protocol fees (native tokens)
+- `total_staked`: Native tokens currently locked across open claims
+- `total_disputes`: Lifetime count of disputes raised
 
 ## Security Model
 

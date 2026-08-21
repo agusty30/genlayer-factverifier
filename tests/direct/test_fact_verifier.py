@@ -14,6 +14,24 @@ from tests.direct.conftest import to_hex
 
 CONTRACT_PATH = "contracts/fact_verifier.py"
 
+# Minimum stake required by submit_claim / dispute_claim (payable). Mirrors
+# MIN_SUBMISSION_STAKE in contracts/fact_verifier.py. These tests exercise the
+# verification logic rather than the economics, so every call carries exactly
+# the minimum stake unless a test overrides direct_vm.value.
+DEFAULT_STAKE = 10**16
+
+
+@pytest.fixture(autouse=True)
+def _default_stake(direct_vm):
+    """Attach the minimum stake to every call in this module by default.
+
+    Because direct_deploy and direct_vm share one VMContext per test, setting
+    value here means the payable submit_claim/dispute_claim calls in the
+    existing suite receive a valid stake without each test having to set it.
+    """
+    direct_vm.value = DEFAULT_STAKE
+    return direct_vm
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

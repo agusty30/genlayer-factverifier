@@ -9,6 +9,8 @@ multiple facts as part of a larger workflow (e.g., news aggregation,
 research validation, compliance checking).
 """
 
+MIN_STAKE = 10**16  # 0.01 GEN — mirrors contract MIN_SUBMISSION_STAKE (payable submit)
+
 
 def example_batch_verification():
     """
@@ -55,6 +57,7 @@ def example_batch_verification():
             source_urls=item["sources"],
             category=item["category"],
             context=item["context"],
+            value=MIN_STAKE,  # payable — stake sent as call value
         )
         claim_ids.append(claim_id)
         print(f"Submitted: {claim_id} - {item['claim'][:50]}...")
@@ -103,6 +106,7 @@ def example_integration_pattern():
         ],
         category="finance",
         context="Q3 2024 earnings verification for governance proposal",
+        value=MIN_STAKE,  # payable — stake sent as call value
     )
 
     # 2. Check verification result before proceeding
