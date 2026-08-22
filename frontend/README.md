@@ -1,53 +1,54 @@
-# GenLayer Football Market
+# FactVerifier — frontend
 
-Next.js frontend for GenLayer Football Market - AI-powered football match predictions on GenLayer blockchain.
+Next.js dApp for **FactVerifier**, a cross-source fact-verification oracle built as a
+GenLayer Intelligent Contract. Every user action is a live transaction against the
+deployed contract on **Bradbury testnet**:
+
+- **Submit** a factual claim with 2–5 source URLs and a GEN stake. The contract fetches
+  each source and runs per-source LLM analysis under the equivalence principle, recording
+  a verdict + consensus score on-chain.
+- **Read** the verdict, per-source support/refute breakdown, confidence, and evidence.
+- **Dispute** a verdict with counter-sources and a matching stake — consensus is re-run and
+  the winner takes the loser's stake, minus a protocol fee.
+- **Finalize** an unchallenged claim (submitter only) and **withdraw** your balance
+  (pull-payment).
+
+Live contract: [`0x0341797e201C1e697E89a199E6bC0e2e0bF5193a`](https://explorer-bradbury.genlayer.com/address/0x0341797e201C1e697E89a199E6bC0e2e0bF5193a)
 
 ## Setup
 
 1. Install dependencies:
 
-**Using bun:**
-```bash
-bun install
-```
-
-**Using npm:**
 ```bash
 npm install
 ```
 
-2. Create `.env` file:
+2. Configure environment variables. The defaults already point at the live Bradbury
+   deployment, so this step is optional:
+
 ```bash
-cp .env.example .env
+cp .env.example .env.local
 ```
 
-3. Configure environment variables:
-   - `NEXT_PUBLIC_CONTRACT_ADDRESS` - GenLayer Football Betting contract address
-   - `NEXT_PUBLIC_STUDIO_URL` - GenLayer Studio URL (default: https://studio.genlayer.com/api)
+   - `NEXT_PUBLIC_CONTRACT_ADDRESS` — FactVerifier contract address (defaults to the live one)
+   - `NEXT_PUBLIC_GENLAYER_RPC_URL` — GenLayer RPC (default: `https://rpc-bradbury.genlayer.com`)
+   - `NEXT_PUBLIC_GENLAYER_CHAIN_ID` — chain id (default: `4221`)
+   - `NEXT_PUBLIC_GENLAYER_EXPLORER_URL` — block explorer base URL
+
+   To develop against a local Studio instead, set the RPC URL and chain id to your Studio node.
 
 ## Development
 
-**Using bun:**
-```bash
-bun dev
-```
-
-**Using npm:**
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000). Reads work with no wallet; submitting,
+disputing, finalizing, and withdrawing require MetaMask connected to Bradbury and a little
+GEN for stake and fees.
 
 ## Build
 
-**Using bun:**
-```bash
-bun run build
-bun start
-```
-
-**Using npm:**
 ```bash
 npm run build
 npm start
@@ -55,30 +56,32 @@ npm start
 
 ## Tech Stack
 
-- **Next.js 15** - React framework with App Router
-- **TypeScript** - Type safety
-- **Tailwind CSS v4** - Styling with custom glass-morphism theme
-- **genlayer-js** - GenLayer blockchain SDK
-- **TanStack Query (React Query)** - Data fetching and caching
-- **Radix UI** - Accessible component primitives
-- **shadcn/ui** - Pre-built UI components
+- **Next.js (App Router)** + **React 19** + **TypeScript**
+- **Tailwind CSS v4** — glass-morphism dark theme
+- **genlayer-js** — GenLayer blockchain SDK (reads/writes, MetaMask signing)
+- **viem** — `parseEther`/`formatEther` for GEN amounts
+- **TanStack Query** — data fetching, caching, invalidation
+- **Radix UI** / shadcn-style primitives, **sonner** toasts
 
-## Wallet Management
+## How the frontend talks to GenLayer
 
-The app uses GenLayer's account system:
-- **Create Account**: Generate a new private key
-- **Import Account**: Import existing private key
-- **Export Account**: Export your private key (secured)
-- **Disconnect**: Clear stored account data
-
-Accounts are stored in browser's localStorage for development convenience.
+- `lib/genlayer/client.ts` — network config + MetaMask helpers; resolves the genlayer-js
+  chain for Bradbury (env-driven).
+- `lib/contracts/FactVerifier.ts` — typed contract wrapper. Reads decode genlayer-js `Map`
+  results into plain objects; writes send the stake as the payable `value` and poll the
+  receipt with `waitForTransactionReceipt`.
+- `lib/hooks/useFactVerifier.ts` — TanStack Query hooks (`useStats`, `useClaims`,
+  `useStakeInfo`, `useClaimable`, `useOwner`) and mutations (`useSubmitClaim`,
+  `useDisputeClaim`, `useFinalizeClaim`, `useWithdraw`, `useWithdrawTreasury`).
+- `components/` — `StatsBar`, `ClaimsTable` + `ClaimDetail`, `SubmitClaimModal`,
+  `DisputeModal`, `ClaimablePanel`.
 
 ## Features
 
-- **Create Bets**: Create football match predictions with team names, game date, and predicted winner (Team 1, Team 2, or Draw)
-- **View Bets**: Real-time bet table with match details, predictions, status, and owners
-- **Resolve Bets**: Bet owners can resolve matches using GenLayer's AI to verify actual results
-- **Leaderboard**: Track top players by points earned from correct predictions
-- **Player Stats**: View your points and ranking in the community
-- **Glass-morphism UI**: Premium dark theme with OKLCH colors, backdrop blur effects, and smooth animations
-- **Real-time Updates**: Automatic data fetching with 3-second polling intervals via TanStack Query
+- **Submit claims** with client-side validation mirroring the contract (2–5 sources,
+  http(s), length bounds, distinct domains, prompt-injection guard).
+- **Claims table** with status badges, consensus score, and per-source support counts;
+  rows expand to full per-source analysis and settlement state.
+- **Dispute / finalize / withdraw** flows with fee-preset selection (low / standard / high).
+- **Live stats** — total claims, verified, refuted, disputes, staked GEN, treasury.
+- **Explorer links** for the contract, submitters, and winners on Bradbury.

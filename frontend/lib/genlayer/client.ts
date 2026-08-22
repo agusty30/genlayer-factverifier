@@ -1,24 +1,84 @@
 "use client";
 
 import { createClient } from "genlayer-js";
-import { studionet } from "genlayer-js/chains";
+import * as glChains from "genlayer-js/chains";
 import { createWalletClient, custom, type WalletClient } from "viem";
 
-// GenLayer Network Configuration (from environment variables with fallbacks)
-export const GENLAYER_CHAIN_ID = parseInt(process.env.NEXT_PUBLIC_GENLAYER_CHAIN_ID || "61999");
+/**
+ * GenLayer network configuration.
+ *
+ * Defaults target the **Bradbury testnet** (where the FactVerifier contract is
+ * deployed), but every value is overridable via NEXT_PUBLIC_* env vars, so the
+ * same build can point at a local Studio by editing `.env.local`.
+ */
+export const GENLAYER_CHAIN_ID = parseInt(
+  process.env.NEXT_PUBLIC_GENLAYER_CHAIN_ID || "4221"
+);
 export const GENLAYER_CHAIN_ID_HEX = `0x${GENLAYER_CHAIN_ID.toString(16).toUpperCase()}`;
+
+export const GENLAYER_EXPLORER_URL =
+  process.env.NEXT_PUBLIC_GENLAYER_EXPLORER_URL ||
+  "https://explorer-bradbury.genlayer.com";
 
 export const GENLAYER_NETWORK = {
   chainId: GENLAYER_CHAIN_ID_HEX,
-  chainName: process.env.NEXT_PUBLIC_GENLAYER_CHAIN_NAME || "GenLayer Studio",
+  chainName:
+    process.env.NEXT_PUBLIC_GENLAYER_CHAIN_NAME || "GenLayer Bradbury Testnet",
   nativeCurrency: {
     name: process.env.NEXT_PUBLIC_GENLAYER_SYMBOL || "GEN",
     symbol: process.env.NEXT_PUBLIC_GENLAYER_SYMBOL || "GEN",
     decimals: 18,
   },
-  rpcUrls: [process.env.NEXT_PUBLIC_GENLAYER_RPC_URL || "https://studio.genlayer.com/api"],
-  blockExplorerUrls: [],
+  rpcUrls: [
+    process.env.NEXT_PUBLIC_GENLAYER_RPC_URL ||
+      "https://rpc-bradbury.genlayer.com",
+  ],
+  blockExplorerUrls: GENLAYER_EXPLORER_URL ? [GENLAYER_EXPLORER_URL] : [],
 };
+
+/**
+ * Resolve the genlayer-js chain object to drive the SDK client.
+ *
+ * genlayer-js ships several named chains (studionet, localnet, testnets…). We
+ * pick the one whose numeric `id` matches the configured chain id — this way,
+ * if the SDK bundles a Bradbury chain (with the correct consensus config), we
+ * use it verbatim. If none matches (e.g. an older SDK), we synthesize a chain
+ * from `studionet` as a base and override only the network identity, so reads
+ * still work and writes reuse GenLayer's default consensus wiring.
+ */
+function resolveActiveChain(): any {
+  const candidates = Object.values(glChains as Record<string, any>).filter(
+    (c) => c && typeof c === "object" && "id" in c
+  );
+  const match = candidates.find(
+    (c) => Number((c as any).id) === GENLAYER_CHAIN_ID
+  );
+  if (match) {
+    return match;
+  }
+
+  const base: any = (glChains as any).studionet ?? candidates[0] ?? {};
+  return {
+    ...base,
+    id: GENLAYER_CHAIN_ID,
+    name: GENLAYER_NETWORK.chainName,
+    nativeCurrency: GENLAYER_NETWORK.nativeCurrency,
+    rpcUrls: {
+      default: { http: [getStudioUrl()] },
+      public: { http: [getStudioUrl()] },
+    },
+    ...(GENLAYER_EXPLORER_URL
+      ? {
+          blockExplorers: {
+            default: { name: "Explorer", url: GENLAYER_EXPLORER_URL },
+          },
+        }
+      : {}),
+  };
+}
+
+/** The genlayer-js chain object used for all clients in the app. */
+export const activeChain = resolveActiveChain();
 
 // Ethereum provider type from window
 interface EthereumProvider {
@@ -35,24 +95,41 @@ declare global {
 }
 
 /**
- * Get the GenLayer RPC URL from environment variables
+ * Get the GenLayer RPC URL from environment variables (defaults to Bradbury).
  */
 export function getStudioUrl(): string {
   return (
-    process.env.NEXT_PUBLIC_GENLAYER_RPC_URL || "https://studio.genlayer.com/api"
+    process.env.NEXT_PUBLIC_GENLAYER_RPC_URL ||
+    "https://rpc-bradbury.genlayer.com"
   );
 }
 
 /**
- * Get the contract address from environment variables
+ * Get the FactVerifier contract address.
+ *
+ * Defaults to the live Bradbury deployment so the app works out of the box;
+ * override with NEXT_PUBLIC_CONTRACT_ADDRESS to point at another deployment.
  */
 export function getContractAddress(): string {
-  const address = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
-  if (!address) {
-    // Return empty string during build, error will be shown in UI during runtime
-    return "";
-  }
-  return address;
+  return (
+    process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ||
+    "0x0341797e201C1e697E89a199E6bC0e2e0bF5193a"
+  );
+}
+
+/** Explorer base URL (no trailing slash). */
+export function getExplorerUrl(): string {
+  return GENLAYER_EXPLORER_URL.replace(/\/$/, "");
+}
+
+/** Explorer link for an address. */
+export function getExplorerAddressUrl(address: string): string {
+  return `${getExplorerUrl()}/address/${address}`;
+}
+
+/** Explorer link for a transaction hash. */
+export function getExplorerTxUrl(hash: string): string {
+  return `${getExplorerUrl()}/tx/${hash}`;
 }
 
 /**
@@ -281,7 +358,7 @@ export function createMetaMaskWalletClient(): WalletClient | null {
 
   try {
     return createWalletClient({
-      chain: studionet as any,
+      chain: activeChain as any,
       transport: custom(provider),
     });
   } catch (error) {
@@ -299,7 +376,8 @@ export function createMetaMaskWalletClient(): WalletClient | null {
  */
 export function createGenLayerClient(address?: string) {
   const config: any = {
-    chain: studionet,
+    chain: activeChain,
+    endpoint: getStudioUrl(),
   };
 
   if (address) {
@@ -312,7 +390,8 @@ export function createGenLayerClient(address?: string) {
     console.error("Error creating GenLayer client:", error);
     // Return client without account on error
     return createClient({
-      chain: studionet,
+      chain: activeChain,
+      endpoint: getStudioUrl(),
     });
   }
 }

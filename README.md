@@ -9,6 +9,37 @@ A production-quality GenLayer Intelligent Contract that verifies factual claims 
 
 It is backed by an **economic staking layer**: submitting a claim and challenging one both require locking native GEN, and the party consensus sides with is rewarded from the other's stake (minus a small protocol fee). This gives the oracle skin-in-the-game spam resistance and a sustainable fee model. See [docs/economic-security.md](docs/economic-security.md) and [MILESTONE.md](MILESTONE.md).
 
+## Live Deployment & Web App
+
+FactVerifier is **live on the GenLayer Bradbury testnet**, and the `frontend/` directory is a
+real dApp whose every action is a transaction against that contract — not a demo mock.
+
+| | |
+|---|---|
+| **Network** | Bradbury testnet (chainId `4221`) |
+| **Contract** | [`0x0341797e201C1e697E89a199E6bC0e2e0bF5193a`](https://explorer-bradbury.genlayer.com/address/0x0341797e201C1e697E89a199E6bC0e2e0bF5193a) |
+| **RPC** | `https://rpc-bradbury.genlayer.com` |
+| **Explorer** | `https://explorer-bradbury.genlayer.com` |
+
+**App ↔ contract flow** (see [frontend/README.md](frontend/README.md) for details):
+
+1. **Submit** — the UI validates the claim + 2–5 sources client-side (mirroring the
+   contract's own checks), then calls `submit_claim(...)` with the stake sent as the payable
+   `value`. genlayer-js signs it through the user's MetaMask on Bradbury.
+2. **Read** — `get_stats`, `get_claim`, and `get_stake_info` are read live and rendered as the
+   stats bar, claims table, per-source analysis, and settlement state.
+3. **Dispute / Finalize / Withdraw** — `dispute_claim` (payable), `finalize_claim`, and
+   `withdraw` are wired to contextual buttons; the pull-payment balance from `get_claimable`
+   surfaces in the account panel and a dedicated withdraw panel.
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:3000 — connect MetaMask on Bradbury
+```
+
+Reads work with no wallet; writes require MetaMask on Bradbury and a little GEN for stake + fees.
+
 ## Why GenLayer?
 
 Traditional smart contracts cannot access the web or reason about natural language. GenLayer changes this:
@@ -86,7 +117,7 @@ examples/
 deploy/
   deployFactVerifier.ts     # Deployment script for FactVerifier
   deployScript.ts           # Deployment script for FootballBets
-frontend/                   # Next.js 15 app (from boilerplate)
+frontend/                   # Next.js dApp — live FactVerifier UI (submit/dispute/finalize/withdraw)
 MILESTONE.md                # What changed since the accepted version, and why
 ```
 
