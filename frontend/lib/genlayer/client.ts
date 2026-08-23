@@ -36,28 +36,67 @@ export const GENLAYER_NETWORK = {
   blockExplorerUrls: GENLAYER_EXPLORER_URL ? [GENLAYER_EXPLORER_URL] : [],
 };
 
+/** Extract a lowercased host from a URL, or "" if it can't be parsed. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Resolve the genlayer-js chain object to drive the SDK client.
  *
- * genlayer-js ships several named chains (studionet, localnet, testnets…). We
- * pick the one whose numeric `id` matches the configured chain id — this way,
- * if the SDK bundles a Bradbury chain (with the correct consensus config), we
- * use it verbatim. If none matches (e.g. an older SDK), we synthesize a chain
- * from `studionet` as a base and override only the network identity, so reads
- * still work and writes reuse GenLayer's default consensus wiring.
+ * genlayer-js bundles several named chains (studionet, localnet, testnetAsimov,
+ * testnetBradbury…). IMPORTANT: multiple GenLayer testnets currently share the
+ * same numeric `id` (both Asimov and Bradbury report id 4221) while carrying
+ * DIFFERENT consensus-contract addresses and RPC URLs — and genlayer-js builds
+ * *writes* against the chain's consensus contracts. Matching on `id` alone is
+ * therefore ambiguous and can silently target the wrong network's contracts.
+ *
+ * We resolve in priority order:
+ *   1. explicit `NEXT_PUBLIC_GENLAYER_CHAIN_KEY` (exact genlayer-js export name),
+ *   2. the bundled chain whose default RPC host matches the configured RPC —
+ *      the RPC URL is the real source of truth for which network we talk to,
+ *      and it disambiguates chains that share an id,
+ *   3. the bundled chain whose numeric `id` matches (last-resort, ambiguous),
+ *   4. a chain synthesized from `studionet` (e.g. local Studio / custom RPC),
+ *      overriding only the network identity.
  */
 function resolveActiveChain(): any {
-  const candidates = Object.values(glChains as Record<string, any>).filter(
+  const named = glChains as Record<string, any>;
+  const candidates = Object.values(named).filter(
     (c) => c && typeof c === "object" && "id" in c
   );
-  const match = candidates.find(
-    (c) => Number((c as any).id) === GENLAYER_CHAIN_ID
-  );
-  if (match) {
-    return match;
+
+  // 1. explicit override by genlayer-js export name
+  const key = process.env.NEXT_PUBLIC_GENLAYER_CHAIN_KEY;
+  if (key && named[key] && typeof named[key] === "object" && "id" in named[key]) {
+    return named[key];
   }
 
-  const base: any = (glChains as any).studionet ?? candidates[0] ?? {};
+  // 2. match by RPC host (disambiguates id collisions like Asimov vs Bradbury)
+  const rpcHost = hostOf(getStudioUrl());
+  if (rpcHost) {
+    const byRpc = candidates.find((c) => {
+      const http =
+        c?.rpcUrls?.default?.http?.[0] ?? c?.rpcUrls?.public?.http?.[0];
+      return http && hostOf(http) === rpcHost;
+    });
+    if (byRpc) {
+      return byRpc;
+    }
+  }
+
+  // 3. match by numeric id (ambiguous across testnets — last resort)
+  const byId = candidates.find((c) => Number((c as any).id) === GENLAYER_CHAIN_ID);
+  if (byId) {
+    return byId;
+  }
+
+  // 4. synthesize from studionet (local Studio / unrecognized custom RPC)
+  const base: any = named.studionet ?? candidates[0] ?? {};
   return {
     ...base,
     id: GENLAYER_CHAIN_ID,
