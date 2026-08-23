@@ -40,6 +40,12 @@ npm run dev        # http://localhost:3000 — connect MetaMask on Bradbury
 
 Reads work with no wallet; writes require MetaMask on Bradbury and a little GEN for stake + fees.
 
+> **Deploy the web app:** it runs on [Railway](https://railway.com) with zero config — the repo
+> ships `railway.json` and `.nvmrc`, and the root scripts drive the build. Point the Railway
+> service at the **repo root** (not `frontend/`); see
+> [frontend/README.md](frontend/README.md#deploy-railway) for the steps. As a client-side dApp
+> with no backend, it also deploys to any static host (Vercel / Cloudflare Pages / Netlify).
+
 ## Why GenLayer?
 
 Traditional smart contracts cannot access the web or reason about natural language. GenLayer changes this:
