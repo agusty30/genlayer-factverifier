@@ -1,5 +1,5 @@
 import { createClient } from "genlayer-js";
-import { activeChain, getStudioUrl } from "../genlayer/client";
+import { activeChain, getStudioUrl, getEthereumProvider } from "../genlayer/client";
 import type {
   Claim,
   ClaimStatus,
@@ -169,7 +169,8 @@ function toStats(raw: any): Stats {
 /**
  * FactVerifier — typed client for the GenLayer cross-source fact-verification
  * oracle. Reads work without a wallet; writes require a connected account and
- * are signed via MetaMask by genlayer-js when `account` is set.
+ * are signed by the connected injected wallet (MetaMask, Rabby, …) that
+ * genlayer-js drives through `window.ethereum` when `account` is set.
  */
 class FactVerifier {
   private contractAddress: `0x${string}`;
@@ -185,7 +186,13 @@ class FactVerifier {
     this.studioUrl = studioUrl;
 
     const config: any = { chain: activeChain };
-    if (address) config.account = address as `0x${string}`;
+    if (address) {
+      config.account = address as `0x${string}`;
+      // Route signing through the wallet the user connected with (Rabby,
+      // MetaMask, …) rather than genlayer-js's window.ethereum default.
+      const provider = getEthereumProvider();
+      if (provider) config.provider = provider;
+    }
     config.endpoint = studioUrl || getStudioUrl();
 
     this.client = createClient(config);
@@ -197,6 +204,8 @@ class FactVerifier {
       account: address as `0x${string}`,
       endpoint: this.studioUrl || getStudioUrl(),
     };
+    const provider = getEthereumProvider();
+    if (provider) config.provider = provider;
     this.client = createClient(config);
   }
 

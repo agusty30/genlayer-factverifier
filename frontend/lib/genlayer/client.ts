@@ -119,9 +119,12 @@ function resolveActiveChain(): any {
 /** The genlayer-js chain object used for all clients in the app. */
 export const activeChain = resolveActiveChain();
 
-// Ethereum provider type from window
+// EIP-1193 injected provider (MetaMask, Rabby, or any compatible wallet).
 interface EthereumProvider {
   isMetaMask?: boolean;
+  isRabby?: boolean;
+  /** Present when multiple wallets are installed; each entry is a provider. */
+  providers?: EthereumProvider[];
   request: (args: { method: string; params?: any[] }) => Promise<any>;
   on: (event: string, handler: (...args: any[]) => void) => void;
   removeListener: (event: string, handler: (...args: any[]) => void) => void;
@@ -172,30 +175,55 @@ export function getExplorerTxUrl(hash: string): string {
 }
 
 /**
- * Check if MetaMask is installed
- */
-export function isMetaMaskInstalled(): boolean {
-  if (typeof window === "undefined") return false;
-  return !!window.ethereum?.isMetaMask;
-}
-
-/**
- * Get the Ethereum provider (MetaMask)
+ * Get the injected EIP-1193 provider (MetaMask, Rabby, or any compatible wallet).
+ *
+ * When several wallets are installed they expose themselves through
+ * `window.ethereum.providers`. We prefer Rabby, then MetaMask, then whatever is
+ * first — so a user with both installed connects through Rabby.
  */
 export function getEthereumProvider(): EthereumProvider | null {
   if (typeof window === "undefined") return null;
-  return window.ethereum || null;
+  const injected = window.ethereum;
+  if (!injected) return null;
+
+  const list = injected.providers;
+  if (Array.isArray(list) && list.length > 0) {
+    return (
+      list.find((p) => p?.isRabby) ??
+      list.find((p) => p?.isMetaMask) ??
+      list[0]
+    );
+  }
+  return injected;
 }
 
 /**
- * Request accounts from MetaMask
+ * Whether any Web3 wallet (MetaMask, Rabby, …) is available to connect.
+ */
+export function isWalletInstalled(): boolean {
+  return getEthereumProvider() !== null;
+}
+
+/**
+ * Human-readable name of the active injected wallet, for UI copy.
+ */
+export function getWalletName(): string {
+  const provider = getEthereumProvider();
+  if (!provider) return "wallet";
+  if (provider.isRabby) return "Rabby";
+  if (provider.isMetaMask) return "MetaMask";
+  return "your wallet";
+}
+
+/**
+ * Request accounts from the connected wallet
  * @returns Array of addresses
  */
 export async function requestAccounts(): Promise<string[]> {
   const provider = getEthereumProvider();
 
   if (!provider) {
-    throw new Error("MetaMask is not installed");
+    throw new Error("No wallet detected");
   }
 
   try {
@@ -207,7 +235,7 @@ export async function requestAccounts(): Promise<string[]> {
     if (error.code === 4001) {
       throw new Error("User rejected the connection request");
     }
-    throw new Error(`Failed to connect to MetaMask: ${error.message}`);
+    throw new Error(`Failed to connect wallet: ${error.message}`);
   }
 }
 
@@ -261,7 +289,7 @@ export async function addGenLayerNetwork(): Promise<void> {
   const provider = getEthereumProvider();
 
   if (!provider) {
-    throw new Error("MetaMask is not installed");
+    throw new Error("No wallet detected");
   }
 
   try {
@@ -284,7 +312,7 @@ export async function switchToGenLayerNetwork(): Promise<void> {
   const provider = getEthereumProvider();
 
   if (!provider) {
-    throw new Error("MetaMask is not installed");
+    throw new Error("No wallet detected");
   }
 
   try {
@@ -320,12 +348,12 @@ export async function isOnGenLayerNetwork(): Promise<boolean> {
 }
 
 /**
- * Connect to MetaMask and ensure we're on GenLayer network
+ * Connect the injected wallet and ensure we're on the GenLayer network
  * @returns The connected address
  */
 export async function connectMetaMask(): Promise<string> {
-  if (!isMetaMaskInstalled()) {
-    throw new Error("MetaMask is not installed");
+  if (!isWalletInstalled()) {
+    throw new Error("No wallet detected");
   }
 
   // Request accounts
@@ -355,7 +383,7 @@ export async function switchAccount(): Promise<string> {
   const provider = getEthereumProvider();
 
   if (!provider) {
-    throw new Error("MetaMask is not installed");
+    throw new Error("No wallet detected");
   }
 
   try {
@@ -421,6 +449,15 @@ export function createGenLayerClient(address?: string) {
 
   if (address) {
     config.account = address as `0x${string}`;
+    // Sign through the SAME injected wallet the user connected with. genlayer-js
+    // otherwise defaults to `window.ethereum`, which — when multiple wallets are
+    // installed — may not be the one the user selected (e.g. Rabby vs MetaMask).
+    // Passing the resolved provider keeps reads, the pre-send chain check, and
+    // signing all on one wallet.
+    const provider = getEthereumProvider();
+    if (provider) {
+      config.provider = provider;
+    }
   }
 
   try {
