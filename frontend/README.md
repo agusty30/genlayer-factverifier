@@ -54,6 +54,29 @@ npm run build
 npm start
 ```
 
+## Deploy (Railway)
+
+This app deploys to [Railway](https://railway.com) directly from the repo. It's an
+npm-workspaces monorepo — the lockfile lives at the repo **root** — so point the Railway
+service at the **repository root**, not this `frontend/` folder. The root `package.json`
+scripts delegate the build here, and the root `railway.json` + `.nvmrc` pin the commands and
+Node version, so there's effectively nothing to configure.
+
+1. **New Project → Deploy from GitHub repo** and pick this repo.
+2. **Root Directory:** leave it as the repo root. Do *not* set it to `frontend/` — `npm ci`
+   needs the lockfile that only exists at the root.
+3. Build and start commands are read from `railway.json` (`npm run build` / `npm run start`),
+   and Node 22 from `.nvmrc`.
+4. **Variables (optional):** every `NEXT_PUBLIC_*` value defaults to the live Bradbury
+   deployment, so it runs with none set. To override, copy keys from `.env.example`. They are
+   inlined at **build** time, so set them before the first deploy, not after.
+5. Deploy. Railway serves the app over HTTPS (which wallets require to inject) and routes its
+   injected `$PORT` to `next start` automatically.
+
+> No backend and no secrets are involved — it's a client-side dApp (the build prerenders to
+> static content) — so any static host (Vercel / Cloudflare Pages / Netlify) works equally
+> well if you prefer one.
+
 ## Tech Stack
 
 - **Next.js (App Router)** + **React 19** + **TypeScript**
