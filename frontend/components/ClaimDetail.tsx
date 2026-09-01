@@ -17,8 +17,9 @@ import { Button } from "./ui/button";
 import { AddressDisplay } from "./AddressDisplay";
 import { DisputeModal } from "./DisputeModal";
 
-function gen(wei: bigint): string {
-  return `${Number(formatEther(wei)).toLocaleString(undefined, {
+function gen(wei: bigint | string): string {
+  const v = typeof wei === "string" ? BigInt(wei) : wei;
+  return `${Number(formatEther(v)).toLocaleString(undefined, {
     maximumFractionDigits: 6,
   })} GEN`;
 }

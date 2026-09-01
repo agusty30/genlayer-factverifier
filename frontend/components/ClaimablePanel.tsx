@@ -12,9 +12,10 @@ import {
 } from "@/lib/hooks/useFactVerifier";
 import { Button } from "./ui/button";
 
-function gen(wei: bigint | undefined): string {
-  if (!wei) return "0";
-  return Number(formatEther(wei)).toLocaleString(undefined, {
+function gen(wei: bigint | string | undefined | null): string {
+  if (wei === undefined || wei === null) return "0";
+  const v = typeof wei === "string" ? BigInt(wei) : wei;
+  return Number(formatEther(v)).toLocaleString(undefined, {
     maximumFractionDigits: 6,
   });
 }

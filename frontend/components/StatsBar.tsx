@@ -11,9 +11,10 @@ import {
 } from "lucide-react";
 import { useStats } from "@/lib/hooks/useFactVerifier";
 
-function formatGen(wei: bigint | undefined): string {
-  if (!wei) return "0";
-  const gen = Number(formatEther(wei));
+function formatGen(wei: bigint | string | undefined): string {
+  if (wei === undefined || wei === null) return "0";
+  const v = typeof wei === "string" ? BigInt(wei) : wei;
+  const gen = Number(formatEther(v));
   return gen.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 

@@ -13,6 +13,7 @@ total_staked). Actual native-balance movement is covered by integration tests.
 """
 
 import json
+from datetime import datetime, timezone, timedelta
 
 from tests.direct.conftest import to_hex
 
@@ -227,6 +228,8 @@ class TestFinalize:
         contract = direct_deploy(CONTRACT_PATH)
         claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
 
+        # Wait out the 5-minute challenge window.
+        direct_vm.warp("2030-01-01T00:06:00+00:00")
         direct_vm.sender = direct_alice
         contract.finalize_claim(claim_id)
 
@@ -240,6 +243,9 @@ class TestFinalize:
         contract = direct_deploy(CONTRACT_PATH)
         claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
 
+        # Wait out the challenge window so the timelock doesn't mask
+        # the access-control revert we actually want to exercise.
+        direct_vm.warp("2030-01-01T00:06:00+00:00")
         direct_vm.sender = direct_bob
         with direct_vm.expect_revert("Only the submitter can finalize"):
             contract.finalize_claim(claim_id)
@@ -247,6 +253,8 @@ class TestFinalize:
     def test_cannot_finalize_twice(self, direct_vm, direct_deploy, direct_alice):
         contract = direct_deploy(CONTRACT_PATH)
         claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+        # Wait out the challenge window, finalize once, then try again.
+        direct_vm.warp("2030-01-01T00:06:00+00:00")
         direct_vm.sender = direct_alice
         contract.finalize_claim(claim_id)
         with direct_vm.expect_revert("Claim already resolved"):
@@ -257,6 +265,8 @@ class TestFinalize:
     ):
         contract = direct_deploy(CONTRACT_PATH)
         claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+        # Wait out the challenge window, finalize once, then try to dispute.
+        direct_vm.warp("2030-01-01T00:06:00+00:00")
         direct_vm.sender = direct_alice
         contract.finalize_claim(claim_id)
 
@@ -272,6 +282,58 @@ class TestFinalize:
         direct_vm.sender = direct_alice
         with direct_vm.expect_revert("Claim not found"):
             contract.finalize_claim("claim_999")
+
+    def test_cannot_finalize_before_challenge_period(
+        self, direct_vm, direct_deploy, direct_alice
+    ):
+        """Within CHALLENGE_PERIOD_SECONDS, finalize_claim must revert."""
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+
+        # Advance the consensus-injected clock 1 second past submission —
+        # still well inside the 300-second challenge window.
+        submitted_at = contract.get_stake_info(claim_id)["submitted_at"]
+        warp_target = datetime.fromtimestamp(
+            submitted_at + 1, tz=timezone.utc
+        ).isoformat()
+        direct_vm.warp(warp_target)
+        direct_vm.sender = direct_alice
+        with direct_vm.expect_revert("challenge period"):
+            contract.finalize_claim(claim_id)
+
+        assert contract.get_stake_info(claim_id)["resolved"] is False
+
+    def test_can_finalize_after_challenge_period(
+        self, direct_vm, direct_deploy, direct_alice
+    ):
+        """Past CHALLENGE_PERIOD_SECONDS, finalize_claim succeeds."""
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+
+        # 6 minutes > 5-minute window.
+        direct_vm.warp("2030-01-01T00:06:00+00:00")
+        direct_vm.sender = direct_alice
+        contract.finalize_claim(claim_id)
+
+        info = contract.get_stake_info(claim_id)
+        assert info["resolved"] is True
+        assert contract.get_claimable(to_hex(direct_alice)) == MIN_STAKE
+        assert contract.get_stats()["total_staked"] == 0
+
+    def test_dispute_works_during_challenge_period(
+        self, direct_vm, direct_deploy, direct_alice, direct_bob
+    ):
+        """Disputes inside the window still settle the claim immediately."""
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+
+        # 1 minute in — well inside the window.
+        direct_vm.warp("2030-01-01T00:01:00+00:00")
+        _dispute(contract, direct_vm, direct_bob, MIN_STAKE, claim_id, supports=False)
+
+        info = contract.get_stake_info(claim_id)
+        assert info["resolved"] is True
+        assert info["challenger"].lower() == to_hex(direct_bob).lower()
 
 
 # ── Pull-payment withdrawal ────────────────────────────────────────────────────

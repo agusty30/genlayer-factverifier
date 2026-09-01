@@ -47,8 +47,10 @@ Values are in the native token's smallest unit (1 GEN = `10**18`).
  finalize_claim            dispute_claim (payable, challenge C ≥ S)
  (submitter only)                   │
         │                           ▼
-        │                   re-run consensus over
-        │                   original + new sources
+        │                   consensus validates new
+        │                   evidence + re-aggregates
+        │                   with previously validated
+        │                   evidence
         │                           │
         ▼                   ┌────────┴────────┐
    stake S returned         ▼                 ▼
@@ -164,14 +166,22 @@ Bob then calls `withdraw()` and receives 0.0195 GEN; the owner can later call
    settlement deterministic and the game simple. Escalation games (dispute of a
    dispute, bonded appeal ladders) are future work.
 
-2. **No time-locked challenge window.** GenLayer's SDK (v0.3.0-rc7) exposes no
-   block number or timestamp to contract code, so the contract cannot enforce
-   *"claims may be finalized only N blocks after submission."* `finalize_claim`
-   is therefore submitter-initiated. A submitter of a **false** claim could try
-   to finalize before a challenger disputes; this is mitigated by GenLayer's
-   consensus-driven transaction ordering (a submitter cannot guarantee their
-   finalize is sequenced ahead of a pending dispute), but a true timelock will
-   be adopted as soon as the SDK exposes block time.
+2. **Time-locked challenge window (enforced).** The contract stores a
+   `submitted_at` epoch-seconds timestamp on every claim and refuses
+   `finalize_claim` until `CHALLENGE_PERIOD_SECONDS` (300s = 5 minutes) have
+   elapsed. The timestamp is read from the consensus-injected transaction
+   context (`gl.message_raw['datetime']`), so it is identical for all
+   validators and not influenced by the submitter's local clock. During the
+   challenge window anyone may call `dispute_claim`, which settles the claim
+   immediately regardless of when in the window it is called. After the
+   window passes, the submitter is the only party who can settle (via
+   `finalize_claim`).
+   The 5-minute window is short enough for fast UX, long enough that a
+   challenger can observe a freshly-submitted claim on a public explorer and
+   call `dispute_claim` within the window. Pre-existing claims deployed
+   before the field was introduced carry `submitted_at == 0` and bypass the
+   check (`if submitted_at > 0`), preserving backward compatibility for any
+   in-flight claims on the day of redeploy.
 
 3. **Withdrawal to reverting contracts.** `withdraw()` zeroes the ledger before
    transferring (CEI). If the recipient is a contract that rejects the transfer,

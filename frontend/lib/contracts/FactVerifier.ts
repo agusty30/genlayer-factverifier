@@ -1,4 +1,5 @@
 import { createClient } from "genlayer-js";
+import { TransactionStatus } from "genlayer-js/types";
 import { activeChain, getStudioUrl, getEthereumProvider } from "../genlayer/client";
 import type {
   Claim,
@@ -142,12 +143,13 @@ function toClaim(raw: any): Claim {
   };
 }
 
-function toStakeInfo(raw: any): StakeInfo {
+function toStakeInfo(claimId: string, raw: any): StakeInfo {
   const o = decode(raw) ?? {};
   return {
-    stake: toBigInt(o.stake),
+    claim_id: claimId,
+    stake: toBigInt(o.stake).toString(),
     challenger: String(o.challenger ?? ""),
-    challenge_stake: toBigInt(o.challenge_stake),
+    challenge_stake: toBigInt(o.challenge_stake).toString(),
     resolved: Boolean(o.resolved),
     winner: String(o.winner ?? ""),
     status: String(o.status ?? "pending") as ClaimStatus,
@@ -161,8 +163,10 @@ function toStats(raw: any): Stats {
     total_verified: Number(o.total_verified ?? 0),
     total_refuted: Number(o.total_refuted ?? 0),
     total_disputes: Number(o.total_disputes ?? 0),
-    total_staked: toBigInt(o.total_staked),
-    treasury: toBigInt(o.treasury),
+    total_staked: toBigInt(o.total_staked).toString(),
+    treasury: toBigInt(o.treasury).toString(),
+    owner: String(o.owner ?? ""),
+    challenge_period_seconds: Number(o.challenge_period_seconds ?? 0),
   };
 }
 
@@ -259,7 +263,7 @@ class FactVerifier {
       functionName: "get_stake_info",
       args: [claimId],
     });
-    return toStakeInfo(raw);
+    return toStakeInfo(claimId, raw);
   }
 
   async getClaimable(account: string | null): Promise<bigint> {
@@ -386,8 +390,10 @@ class FactVerifier {
 
       const receipt = await this.client.waitForTransactionReceipt({
         hash: txHash,
-        status: "ACCEPTED" as any,
-        retries: 24,
+        // Wait for full finality so callers never see an ACCEPTED receipt
+        // that later reverts during the appeal window.
+        status: TransactionStatus.FINALIZED,
+        retries: 60,
         interval: 5000,
       });
       return receipt as TransactionReceipt;
@@ -419,8 +425,10 @@ class FactVerifier {
 
       const receipt = await this.client.waitForTransactionReceipt({
         hash: txHash,
-        status: "ACCEPTED" as any,
-        retries: 24,
+        // Wait for full finality so callers never see an ACCEPTED receipt
+        // that later reverts during the appeal window.
+        status: TransactionStatus.FINALIZED,
+        retries: 60,
         interval: 5000,
       });
       return receipt as TransactionReceipt;
@@ -447,8 +455,10 @@ class FactVerifier {
 
       const receipt = await this.client.waitForTransactionReceipt({
         hash: txHash,
-        status: "ACCEPTED" as any,
-        retries: 24,
+        // Wait for full finality so callers never see an ACCEPTED receipt
+        // that later reverts during the appeal window.
+        status: TransactionStatus.FINALIZED,
+        retries: 60,
         interval: 5000,
       });
       return receipt as TransactionReceipt;
@@ -472,8 +482,10 @@ class FactVerifier {
 
       const receipt = await this.client.waitForTransactionReceipt({
         hash: txHash,
-        status: "ACCEPTED" as any,
-        retries: 24,
+        // Wait for full finality so callers never see an ACCEPTED receipt
+        // that later reverts during the appeal window.
+        status: TransactionStatus.FINALIZED,
+        retries: 60,
         interval: 5000,
       });
       return receipt as TransactionReceipt;
@@ -499,8 +511,10 @@ class FactVerifier {
 
       const receipt = await this.client.waitForTransactionReceipt({
         hash: txHash,
-        status: "ACCEPTED" as any,
-        retries: 24,
+        // Wait for full finality so callers never see an ACCEPTED receipt
+        // that later reverts during the appeal window.
+        status: TransactionStatus.FINALIZED,
+        retries: 60,
         interval: 5000,
       });
       return receipt as TransactionReceipt;

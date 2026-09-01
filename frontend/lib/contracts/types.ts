@@ -1,65 +1,89 @@
+import type { GenLayerTransaction } from "genlayer-js/types";
+import { TransactionStatus } from "genlayer-js/types";
+
 /**
- * TypeScript types for the GenLayer FactVerifier contract.
+ * Re-export the SDK's GenLayerTransaction as the canonical receipt type for
+ * the FactVerifier contract binding. It carries the full lifecycle status
+ * (UNINITIALIZED → ... → ACCEPTED → FINALIZED), the block number, the
+ * decoded call/deploy payload, and any consensus messages emitted by the
+ * contract during execution.
  *
- * These mirror the dict/list shapes returned by the deployed Intelligent
- * Contract (contracts/fact_verifier.py). Amounts denominated in the native
- * token (GEN) are kept as `bigint` wei; small counters/scores are `number`.
+ * The Optimistic Democracy finality model has two important states:
+ *   - ACCEPTED: validators have reached consensus, but the transaction is
+ *     still in the appeal/finality window and could be challenged.
+ *   - FINALIZED: the appeal window has elapsed; the transaction is final.
+ *
+ * For economically consequential operations (submitClaim, disputeClaim,
+ * finalizeClaim, withdraw, withdrawTreasury) the binding waits for
+ * FINALIZED so the caller never observes an ACCEPTED receipt that later
+ * reverts.
  */
+export type TransactionReceipt = GenLayerTransaction;
+
+export { TransactionStatus };
+
+/**
+ * Predicate: did the receipt reach full finality? Use this in UI to
+ * distinguish "Confirmed by validators" (ACCEPTED) from "Finalized on-chain"
+ * (FINALIZED).
+ */
+export function isFinalized(receipt: TransactionReceipt): boolean {
+  return receipt?.status === TransactionStatus.FINALIZED;
+}
+
+export function isAccepted(receipt: TransactionReceipt): boolean {
+  return receipt?.status === TransactionStatus.ACCEPTED;
+}
+
+// ── Domain types ────────────────────────────────────────────────────────────
 
 export type ClaimStatus =
+  | "pending"
   | "verified"
   | "refuted"
   | "disputed"
-  | "insufficient_sources"
-  | "pending";
+  | "insufficient_sources";
 
-/** One source's per-URL analysis, as returned inside `get_claim`. */
 export interface SourceResult {
   url: string;
   supports_claim: boolean;
-  confidence: number; // 0-100
+  confidence: number;
   evidence: string;
   reasoning: string;
 }
 
-/** A verified claim — the shape of `get_claim(claim_id)`. */
 export interface Claim {
   claim_id: string;
   claim_text: string;
   category: string;
   submitter: string;
   status: ClaimStatus;
-  consensus_score: number; // 0-100
+  consensus_score: number;
   source_count: number;
   sources_supporting: number;
   sources_refuting: number;
   final_reasoning: string;
   source_results: SourceResult[];
+  submitted_at?: number; // epoch seconds; 0 for legacy claims
 }
 
-/** Economic state of a claim — the shape of `get_stake_info(claim_id)`. */
 export interface StakeInfo {
-  stake: bigint; // wei locked by the submitter
-  challenger: string; // "" until disputed
-  challenge_stake: bigint; // wei locked by the challenger
+  claim_id: string;
+  stake: string; // wei bigint as string (Map decode)
+  challenger: string;
+  challenge_stake: string;
   resolved: boolean;
-  winner: string; // "" until resolved
-  status: ClaimStatus;
+  winner: string;
+  status?: ClaimStatus;
 }
 
-/** Platform totals — the shape of `get_stats()`. */
 export interface Stats {
   total_claims: number;
   total_verified: number;
   total_refuted: number;
   total_disputes: number;
-  total_staked: bigint; // wei currently locked in open claims
-  treasury: bigint; // wei of accumulated protocol fees
-}
-
-export interface TransactionReceipt {
-  status: string;
-  hash: string;
-  blockNumber?: number;
-  [key: string]: any;
+  total_staked: string; // wei bigint
+  treasury: string; // wei bigint
+  owner: string;
+  challenge_period_seconds: number;
 }

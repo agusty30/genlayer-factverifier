@@ -7,7 +7,8 @@ import { getContractAddress, getStudioUrl } from "../genlayer/client";
 import type { FeePresetLevel } from "../genlayer/fees";
 import { useWallet } from "../genlayer/wallet";
 import { success, error, configError } from "../utils/toast";
-import type { Claim, StakeInfo, Stats } from "../contracts/types";
+import type { Claim, StakeInfo, Stats, TransactionReceipt } from "../contracts/types";
+import { isFinalized } from "../contracts/types";
 
 /**
  * Get the FactVerifier contract instance.
@@ -168,13 +169,19 @@ export function useSubmitClaim() {
         feePreset
       );
     },
-    onSuccess: () => {
+    onSuccess: (receipt: TransactionReceipt) => {
       invalidateAll(queryClient);
       setIsSubmitting(false);
-      success("Claim submitted & verified!", {
-        description:
-          "The oracle fetched your sources and recorded a verdict on-chain.",
-      });
+      success(
+        isFinalized(receipt)
+          ? "Claim submitted & finalized!"
+          : "Claim submitted (awaiting finality)",
+        {
+          description: isFinalized(receipt)
+            ? "The oracle fetched your sources and the transaction is final on-chain."
+            : "Validators reached consensus; waiting for the finality window.",
+        }
+      );
     },
     onError: (err: any) => {
       console.error("Error submitting claim:", err);
@@ -229,13 +236,17 @@ export function useDisputeClaim() {
       );
       return contract.disputeClaim(claimId, sources, challengeWei, feePreset);
     },
-    onSuccess: () => {
+    onSuccess: (receipt: TransactionReceipt) => {
       invalidateAll(queryClient);
       setIsDisputing(false);
-      success("Dispute settled!", {
-        description:
-          "Consensus was re-run over all sources and stakes were settled.",
-      });
+      success(
+        isFinalized(receipt) ? "Dispute settled (finalized)!" : "Dispute recorded (awaiting finality)",
+        {
+          description: isFinalized(receipt)
+            ? "Consensus validated the new evidence and stakes were settled."
+            : "Dispute accepted by validators; awaiting finality.",
+        }
+      );
     },
     onError: (err: any) => {
       console.error("Error disputing claim:", err);
@@ -279,13 +290,18 @@ export function useFinalizeClaim() {
       const feePreset = await contract.estimateFinalizeClaimFees(claimId);
       return contract.finalizeClaim(claimId, feePreset);
     },
-    onSuccess: () => {
+    onSuccess: (receipt: TransactionReceipt) => {
       invalidateAll(queryClient);
       setIsFinalizing(false);
       setFinalizingClaimId(null);
-      success("Claim finalized!", {
-        description: "Your stake is now withdrawable.",
-      });
+      success(
+        isFinalized(receipt) ? "Claim finalized!" : "Finalization recorded (awaiting finality)",
+        {
+          description: isFinalized(receipt)
+            ? "Your stake is now withdrawable."
+            : "Finalization accepted by validators; awaiting finality.",
+        }
+      );
     },
     onError: (err: any) => {
       console.error("Error finalizing claim:", err);
@@ -327,12 +343,17 @@ export function useWithdraw() {
       const feePreset = await contract.estimateWithdrawFees();
       return contract.withdraw(feePreset);
     },
-    onSuccess: () => {
+    onSuccess: (receipt: TransactionReceipt) => {
       invalidateAll(queryClient);
       setIsWithdrawing(false);
-      success("Withdrawal complete!", {
-        description: "Your balance has been transferred to your wallet.",
-      });
+      success(
+        isFinalized(receipt) ? "Withdrawal complete!" : "Withdrawal recorded (awaiting finality)",
+        {
+          description: isFinalized(receipt)
+            ? "Your balance has been transferred to your wallet."
+            : "Withdrawal accepted by validators; awaiting finality.",
+        }
+      );
     },
     onError: (err: any) => {
       console.error("Error withdrawing:", err);

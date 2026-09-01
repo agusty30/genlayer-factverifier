@@ -27,13 +27,17 @@ export function DisputeModal({
   disabled,
 }: {
   claimId: string;
-  submissionStakeWei: bigint;
+  submissionStakeWei: bigint | string;
   disabled?: boolean;
 }) {
   const { isConnected } = useWallet();
   const { disputeClaim, isDisputing, isSuccess } = useDisputeClaim();
 
-  const minStakeGen = formatEther(submissionStakeWei);
+  const minStakeWei =
+    typeof submissionStakeWei === "string"
+      ? BigInt(submissionStakeWei)
+      : submissionStakeWei;
+  const minStakeGen = formatEther(minStakeWei);
 
   const [open, setOpen] = useState(false);
   const [sources, setSources] = useState<string[]>(["", ""]);
@@ -77,7 +81,7 @@ export function DisputeModal({
     } catch {
       next.stake = "Enter a valid GEN amount";
     }
-    if (challengeWei !== null && challengeWei < submissionStakeWei)
+    if (challengeWei !== null && challengeWei < minStakeWei)
       next.stake = `Challenge must match or exceed the submission stake (${minStakeGen} GEN)`;
 
     setErrors(next);

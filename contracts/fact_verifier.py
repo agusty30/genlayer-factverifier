@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from genlayer import *
 
 
@@ -36,6 +37,21 @@ MIN_SUBMISSION_STAKE = 10**16      # 0.01 GEN — minimum to submit a claim
 PROTOCOL_FEE_BPS = 500             # 5% fee, taken from the loser's forfeited stake
 BPS_DENOMINATOR = 10000
 
+# ── Time-locked challenge window ──────────────────────────────────────────────
+#
+# After a claim is submitted, anyone may call `dispute_claim` to challenge it
+# for the next CHALLENGE_PERIOD_SECONDS. Once the window has elapsed, the
+# submitter is the only party that can settle the claim (via `finalize_claim`).
+# The timestamp is read from the consensus-injected transaction context, so
+# all validators agree on the same instant and no participant can influence
+# the clock by setting a local one.
+#
+# 300 seconds (5 minutes) balances two goals: short enough that the UX is
+# not encumbered by long waits after a submitter is confident their claim
+# is honest, long enough that a challenger can observe a freshly-submitted
+# claim on a public explorer and submit a dispute within the window.
+CHALLENGE_PERIOD_SECONDS = 300
+
 
 # ── Storage data types ───────────────────────────────────────────────────────
 
@@ -69,6 +85,7 @@ class VerificationResult:
     challenge_stake: u256    # native tokens locked by the challenger
     resolved: bool           # True once stakes have been settled (win/refund)
     winner: str              # hex address that recovered the stakes ("" until resolved)
+    submitted_at: u256       # epoch-seconds at submission (0 for legacy claims)
 
 
 class FactVerifier(gl.Contract):
@@ -133,6 +150,28 @@ class FactVerifier(gl.Contract):
             raise gl.vm.UserError("Category cannot be empty")
         if len(category) > MAX_CATEGORY_LENGTH:
             raise gl.vm.UserError(f"Category exceeds maximum length of {MAX_CATEGORY_LENGTH}")
+
+    # ── Internal: timestamp helper ───────────────────────────────────────
+
+    def _now_seconds(self) -> int:
+        """Consensus-injected transaction timestamp, as epoch seconds.
+
+        Reads `gl.message_raw['datetime']` (an ISO 8601 string with timezone,
+        populated by the validator host identically for leader and validators
+        so the result is deterministic across the consensus committee). When
+        the field is missing or malformed, returns 0 — the timelock check in
+        `finalize_claim` treats 0 as "legacy claim without timestamp" and
+        bypasses the window, preserving backward compatibility for any
+        pre-existing claims on the day of redeploy.
+        """
+        raw = gl.message_raw  # type: ignore[attr-defined]
+        iso = raw.get("datetime", "") if isinstance(raw, dict) else ""
+        if not iso:
+            return 0
+        try:
+            return int(datetime.fromisoformat(iso).timestamp())
+        except (ValueError, TypeError):
+            return 0
 
     # ── Internal: parse and normalize LLM output ─────────────────────────
 
@@ -214,6 +253,24 @@ class FactVerifier(gl.Contract):
         }
 
     # ── Internal: single source analysis with consensus ──────────────────
+    #
+    # Field boundary (see docs/consensus-design.md "Consensus-authoritative vs
+    # explanatory-only fields"):
+    #
+    #   supports_claim    (bool)   — CONSENSUS-AUTHORITATIVE. Must match across
+    #                                 leader and validators; re-aggregated on
+    #                                 dispute.
+    #   confidence        (int)    — CONSENSUS-AUTHORITATIVE. Must be within 15
+    #                                 points across validators; re-aggregated
+    #                                 on dispute.
+    #   extracted_evidence (str)   — EXPLANATORY-ONLY. Narrative from the
+    #                                 leader; not validated by the equivalence
+    #                                 principle and not re-aggregated.
+    #   reasoning         (str)    — EXPLANATORY-ONLY. Same as extracted_evidence.
+    #
+    # The prompt_comparative validator prompt below is explicit about this
+    # boundary so validators know to align the boolean and integer scores
+    # while tolerating wording differences in the narrative fields.
 
     def _analyze_single_source(self, claim: str, url: str, context: str) -> str:
         def _do_analysis() -> str:
@@ -250,7 +307,20 @@ Rules:
 
         return gl.eq_principle.prompt_comparative(
             _do_analysis,
-            f"Compare the factual analysis results. Both should reach the same conclusion about whether the source supports or refutes the claim. The supports_claim boolean must match and confidence scores should be within 15 points of each other.",
+            "Compare the factual analysis results. Both should reach the same "
+            "conclusion about whether the source supports or refutes the claim.\n"
+            "\n"
+            "Consensus-authoritative fields (must align across leader and validators):\n"
+            "- supports_claim: boolean — must be identical between leader and validators.\n"
+            "- confidence: integer 0-100 — must be within 15 points.\n"
+            "\n"
+            "Explanatory-only fields (may differ in wording, must not contradict):\n"
+            "- extracted_evidence: brief quote or paraphrase from the source.\n"
+            "- reasoning: short explanation of the verdict.\n"
+            "\n"
+            "The supports_claim boolean and confidence integer are what get "
+            "re-aggregated on dispute, so they must match. The narrative fields "
+            "are descriptive context for users and may be paraphrased differently.",
         )
 
     # ── Public write methods ─────────────────────────────────────────────
@@ -328,6 +398,7 @@ Rules:
             challenge_stake=u256(0),
             resolved=False,
             winner="",
+            submitted_at=u256(self._now_seconds()),
         )
 
         self.claims[claim_id] = result
@@ -428,8 +499,17 @@ Rules:
         claim_record.final_reasoning = "; ".join(reasoning_parts)
 
         # ── Settle stakes ────────────────────────────────────────────────
-        # A dispute "succeeds" when re-running consensus flips the verdict.
-        # The winner recovers their own stake and takes the loser's stake
+        # Consensus validates each new source via the equivalence principle
+        # (leader + validators must agree on `supports_claim` boolean and
+        # `confidence` integer to within 15 points). After validation, the
+        # (supports_claim, confidence) tuple from each newly validated
+        # source is re-aggregated with the (supports_claim, confidence)
+        # tuples already consensus-validated at submission time. Only those
+        # two fields participate in the re-aggregation — the narrative
+        # `extracted_evidence` and `reasoning` fields are explanatory-only
+        # and are NOT re-aggregated. The dispute "succeeds" when the
+        # re-aggregated verdict differs from the original verdict; the
+        # winner recovers their own stake and takes the loser's stake
         # minus the protocol fee. Payouts go to the pull-payment ledger so
         # this method performs no external transfer (see withdraw()).
         dispute_succeeds = new_status != old_status
@@ -457,11 +537,15 @@ Rules:
     def finalize_claim(self, claim_id: str) -> None:
         """Close an unchallenged claim and return the submitter's stake.
 
-        Only the submitter may finalize, and only while the claim is still
-        open (not resolved). This releases locked capital once the submitter
-        is confident no challenge is coming. Note: without on-chain block
-        time the SDK cannot enforce a mandatory challenge window, so this is
-        a submitter-initiated settlement rather than a timelocked one.
+        Only the submitter may finalize, and only after the
+        `CHALLENGE_PERIOD_SECONDS` window has elapsed since submission. During
+        that window anyone may call `dispute_claim`, which settles the claim
+        immediately and short-circuits this method. The window is enforced
+        on-chain using the consensus-injected transaction timestamp, so it
+        is identical for leader and validators and not influenced by the
+        caller's local clock. Legacy claims (deployed before the
+        `submitted_at` field was added) carry `submitted_at == 0` and bypass
+        the check, preserving backward compatibility.
         """
         if claim_id not in self.claims:
             raise gl.vm.UserError("Claim not found")
@@ -469,6 +553,15 @@ Rules:
         claim_record = self.claims[claim_id]
         if claim_record.resolved:
             raise gl.vm.UserError("Claim already resolved")
+
+        submitted_at = int(claim_record.submitted_at)
+        now = self._now_seconds()
+        if submitted_at > 0 and (now - submitted_at) < CHALLENGE_PERIOD_SECONDS:
+            remaining = CHALLENGE_PERIOD_SECONDS - (now - submitted_at)
+            raise gl.vm.UserError(
+                f"Claim cannot be finalized until the {CHALLENGE_PERIOD_SECONDS}-second "
+                f"challenge period has elapsed ({remaining} seconds remaining)"
+            )
 
         submitter_addr = Address(claim_record.submitter)
         if gl.message.sender_address.as_hex != claim_record.submitter:
@@ -565,6 +658,7 @@ Rules:
             "resolved": c.resolved,
             "winner": c.winner,
             "status": c.status,
+            "submitted_at": int(c.submitted_at),
         }
 
     @gl.public.view
