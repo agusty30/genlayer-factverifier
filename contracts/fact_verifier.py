@@ -27,9 +27,10 @@ MAX_CATEGORY_LENGTH = 100
 #
 # The oracle is backed by an economic security layer: submitting a claim requires
 # locking a stake, and challenging one requires matching it. The party the
-# re-run consensus sides with recovers their own stake and takes the loser's
-# stake minus a protocol fee. This makes spamming false claims and frivolous
-# challenges costly, while honest participation is (fee aside) capital-preserving.
+# consensus-validated re-aggregation sides with recovers their own stake and
+# takes the loser's stake minus a protocol fee. This makes spamming false
+# claims and frivolous challenges costly, while honest participation is
+# (fee aside) capital-preserving.
 #
 # Values are in the native token's smallest unit (1 GEN = 10**18).
 

@@ -75,7 +75,7 @@ neither disputed nor finalized again.
 Let `S` = submission stake, `C` = challenge stake (`C ≥ S` enforced), and
 `fee = loser_stake * PROTOCOL_FEE_BPS // BPS_DENOMINATOR`.
 
-**Dispute succeeds** (re-run verdict differs from the stored one) — challenger wins:
+**Dispute succeeds** (consensus-validated re-aggregation flips the verdict) — challenger wins:
 
 ```
 fee     = S * 500 // 10000
@@ -147,7 +147,7 @@ honest, un-disputed submitters anything beyond a temporary stake lock.
 ## Worked example
 
 Alice submits a claim staking 0.01 GEN. Bob disputes with 0.01 GEN and the
-re-run flips the verdict (Bob is right):
+consensus-validated re-aggregation flips the verdict (Bob is right):
 
 ```
 S = C = 1e16, fee = 1e16 * 500 // 10000 = 5e14 (0.005 GEN)

@@ -8,8 +8,10 @@ deployed contract on **Bradbury testnet**:
   each source and runs per-source LLM analysis under the equivalence principle, recording
   a verdict + consensus score on-chain.
 - **Read** the verdict, per-source support/refute breakdown, confidence, and evidence.
-- **Dispute** a verdict with counter-sources and a matching stake — consensus is re-run and
-  the winner takes the loser's stake, minus a protocol fee.
+- **Dispute** a verdict with counter-sources and a matching stake — consensus
+  validates the new sources and re-aggregates them with the previously
+  consensus-validated sources; the winner takes the loser's stake, minus a
+  protocol fee.
 - **Finalize** an unchallenged claim (submitter only) and **withdraw** your balance
   (pull-payment).
 

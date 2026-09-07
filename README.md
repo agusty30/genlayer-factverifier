@@ -100,18 +100,13 @@ User submits:  "The Eiffel Tower is in Paris"
 ```
 contracts/
   fact_verifier.py          # Main intelligent contract
-  football_bets.py          # Example contract (from boilerplate)
 tests/
   direct/                   # Fast in-memory tests (no Studio required)
     test_fact_verifier.py   # 49 verification + validation test cases
     test_staking.py         # 28 economic-layer test cases (stakes, disputes, payouts)
-    test_create_bet.py
-    test_resolve_bet.py
-    test_views.py
-    test_patterns.py
   integration/              # Full tests against GenLayer Studio
-    test_fact_verifier.py   # 8 e2e tests incl. finalize/withdraw and dispute settlement
-    test_football_bets.py
+    test_fact_verifier.py   # 8 e2e tests
+    test_new_features.py    # run_validator() + visual inputs (web.render, exec_prompt images=)
 docs/
   architecture.md           # System architecture and state model
   consensus-design.md       # Consensus mechanism deep dive
@@ -122,7 +117,6 @@ examples/
   multi_claim_batch.py      # Batch verification and integration patterns
 deploy/
   deployFactVerifier.ts     # Deployment script for FactVerifier
-  deployScript.ts           # Deployment script for FootballBets
 frontend/                   # Next.js dApp — live FactVerifier UI (submit/dispute/finalize/withdraw)
 MILESTONE.md                # What changed since the accepted version, and why
 ```
@@ -186,10 +180,11 @@ stake check, so malformed claims are rejected regardless of the value sent.
 #### `dispute_claim(claim_id, dispute_source_urls)`  *(payable)*
 
 Challenge a verified or refuted claim with new sources. **Requires a challenge
-stake** of at least the original submission stake. Consensus is re-run over the
-combined sources; if the verdict flips the challenger wins, otherwise the
-submitter wins. The winner's payout (own stake + loser's stake − fee) is credited
-to the pull-payment ledger and the fee goes to the treasury. Settles the claim.
+stake** of at least the original submission stake. Consensus validates the new
+sources and re-aggregates them with the previously consensus-validated sources;
+if the verdict flips the challenger wins, otherwise the submitter wins. The
+winner's payout (own stake + loser's stake − fee) is credited to the
+pull-payment ledger and the fee goes to the treasury. Settles the claim.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -264,6 +259,17 @@ This means:
 - Validator: `"supports_claim": true, "confidence": 78`
 - **Consensus reached** — same conclusion, confidence within range
 
+**Consensus-validated vs. explanatory-only fields.** `supports_claim` (the
+boolean) and `confidence` (the score) are the only fields validated against the
+equivalence principle — they are the consensus output and the values that go
+into the weighted aggregate. `evidence` (a short quoted passage) and
+`reasoning` (a free-text justification) are returned by the LLM but are
+**explanatory-only**: they are stored on-chain for human inspection but are
+deliberately NOT part of the equivalence check, because two honest analyses of
+the same source naturally produce different prose. Treating them as
+consensus-validated would force false disagreements. This split is what keeps
+the on-chain audit trail useful without breaking consensus.
+
 See [docs/consensus-design.md](docs/consensus-design.md) for the full design rationale.
 
 ## Security
@@ -289,9 +295,10 @@ disputes for free. The economic layer attaches a cost to being wrong:
 | **5% protocol fee** | Funds a sustainable treasury from the loser's stake |
 | **Pull-payment ledger** | Winners `withdraw()`; settlement never pushes transfers |
 
-**Settlement (per dispute):** re-run consensus over original + new sources. If
-the verdict flips, the challenger wins; otherwise the submitter wins. The winner
-is credited `own_stake + (loser_stake − fee)`; the treasury takes `fee`. Value is
+**Settlement (per dispute):** consensus validates the new sources and
+re-aggregates them with the previously consensus-validated sources. If the
+verdict flips, the challenger wins; otherwise the submitter wins. The winner is
+credited `own_stake + (loser_stake − fee)`; the treasury takes `fee`. Value is
 conserved: `winner_payout + fee == submission_stake + challenge_stake`.
 
 An unchallenged claim's submitter can `finalize_claim()` to reclaim their stake.

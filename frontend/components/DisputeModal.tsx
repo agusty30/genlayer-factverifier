@@ -130,9 +130,10 @@ export function DisputeModal({
             Dispute {claimId}
           </DialogTitle>
           <DialogDescription>
-            Stake against the current verdict with your own sources. Consensus is
-            re-run over every source; the winner takes the loser&apos;s stake,
-            minus the protocol fee.
+            Stake against the current verdict with your own sources. Consensus
+            validates your new sources and re-aggregates them with the
+            previously consensus-validated sources; the winner takes the
+            loser&apos;s stake, minus the protocol fee.
           </DialogDescription>
         </DialogHeader>
 
@@ -241,8 +242,9 @@ export function DisputeModal({
           </Button>
           {isDisputing && (
             <p className="text-xs text-center text-muted-foreground">
-              Consensus is being re-run over all sources under the equivalence
-              principle — this can take a little while.
+              Consensus is validating your new sources and re-aggregating them
+              with the previously consensus-validated sources — this can take a
+              little while.
             </p>
           )}
         </div>

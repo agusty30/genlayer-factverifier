@@ -83,11 +83,13 @@ submitter's original stake (see [economic-security.md](economic-security.md)).
 The dispute process:
 
 1. The challenge stake is checked (must be ≥ the submission stake)
-2. New sources are analyzed with the same consensus mechanism
-3. Results are combined with the original source analyses
-4. The aggregation is recalculated over all sources (original + dispute)
-5. Status may change based on the new aggregate score
-6. **Settlement:** if the verdict flipped, the dispute *succeeds* and the
+2. New sources are analyzed with the same consensus mechanism (only the new
+   sources go through consensus validation; previously consensus-validated
+   sources keep their cached `(supports_claim, confidence)` records)
+3. The newly validated results are re-aggregated with the previously
+   consensus-validated results
+4. Status may change based on the new aggregate score
+5. **Settlement:** if the verdict flipped, the dispute *succeeds* and the
    challenger wins; if it held, the submitter wins. The winner is credited their
    own stake plus the loser's stake minus a 5% protocol fee, and the claim is
    marked `resolved` (it can never be disputed again)
@@ -112,3 +114,32 @@ URLs from the same domain are rejected to ensure true source independence. Multi
 ### Low-Confidence Exclusion
 
 Sources scoring below 10% confidence are excluded from aggregation. This prevents irrelevant sources (e.g., a cooking blog for a physics claim) from diluting the consensus.
+
+## Consensus-Validated vs. Explanatory-Only Fields
+
+The leader's LLM call returns a structured object with four fields. Only two
+of them enter the equivalence check; the other two are returned for the human
+audit trail but are deliberately *not* part of consensus:
+
+| Field | Role | Why |
+|-------|------|-----|
+| `supports_claim` (bool) | **Consensus-validated** | The boolean verdict the equivalence principle checks. Drives the `+1 / −1` direction in the weighted aggregate. |
+| `confidence` (0–100) | **Consensus-validated** | The score the equivalence principle checks (within a tolerance band). Drives the magnitude in the weighted aggregate. |
+| `evidence` (string) | Explanatory-only | A short quoted passage from the source. Stored on-chain for inspection. **Not** compared across runs because two honest analyses of the same article pick different sentences. |
+| `reasoning` (string) | Explanatory-only | Free-text justification written by the LLM. Stored on-chain for inspection. **Not** compared across runs — different wordings for the same conclusion would produce false disagreements. |
+
+This split keeps the on-chain record useful without breaking consensus. If
+`evidence` and `reasoning` were consensus-validated, an honest validator that
+happens to quote a different sentence from the same article would be marked as
+disagreeing with the leader, and a single adversarial leader could craft the
+prose fields to force disagreement even when the actual verdict matches.
+Including them in the equivalence check would make consensus brittle; keeping
+them explanatory-only means the human-readable audit trail stays rich while
+the consensus check stays focused on the fields that actually determine the
+verdict.
+
+When a claim is disputed, only the new sources are sent through consensus
+validation; the previously consensus-validated sources retain their cached
+`(supports_claim, confidence)` records and are simply re-aggregated alongside
+the newly validated ones. The full text of an old source is never re-read by
+the LLM.

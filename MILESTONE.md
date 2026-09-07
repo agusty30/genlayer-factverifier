@@ -39,7 +39,8 @@ deployment**.
 
 ### 2. Economic settlement of disputes
 
-When a claim is disputed, consensus is re-run over the original + new sources:
+When a claim is disputed, consensus validates the new sources and
+re-aggregates them with the previously consensus-validated sources:
 
 - If the verdict **flips**, the dispute succeeds and the **challenger wins**.
 - If the verdict **holds**, the **submitter wins**.
@@ -69,7 +70,7 @@ When a claim is disputed, consensus is re-run over the original + new sources:
 | Method | Before | After |
 |--------|--------|-------|
 | `submit_claim` | write | **payable**, requires ≥ 0.01 GEN stake |
-| `dispute_claim` | write, re-aggregates only | **payable**, requires ≥ submission stake, **settles stakes** |
+| `dispute_claim` | write (only re-aggregated validated sources) | **payable**, requires ≥ submission stake, **settles stakes** |
 | `finalize_claim` | — | **new** (submitter reclaims stake) |
 | `withdraw` | — | **new** (pull-payment) |
 | `withdraw_treasury` | — | **new** (owner-only) |
