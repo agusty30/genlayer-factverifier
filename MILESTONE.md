@@ -128,3 +128,41 @@ gltest tests/integration/test_fact_verifier.py -v -s   # 8 tests (needs Studio)
   `tests/integration/test_fact_verifier.py`.
 - **Design:** [docs/economic-security.md](docs/economic-security.md) (new),
   plus updates to `architecture.md`, `consensus-design.md`, `security.md`.
+
+## Steward resubmission (Nov 2026, un-deployed)
+
+The Sep 15, 2026 steward request (Jaydeculein) asked for five fixes, all
+implemented in this working tree and covered by direct tests
+(`tests/direct/test_fact_verifier.py`, `tests/direct/test_staking.py`):
+
+1. **Deployment parity** — see `docs/resubmission-evidence.md`. The current
+   source is NOT the deployed bytecode, so a fresh Bradbury redeploy is
+   required; the new address and deploy transaction will be published there
+   after redeploy. Do not present the old milestone address as the address
+   of this source.
+2. **Payout primitive** — `_emit_payout()` uses the documented EOA transfer
+   mechanism, records every payout as pending, rolls back synchronous
+   emission failures immediately, and recovers asynchronous failures with the
+   owner-only `recredit_failed_withdrawal()` after a 3600s delay.
+3. **Challenge timing** — `dispute_claim` is now rejected after
+   `submitted_at + 300`, matching `finalize_claim`, so the five-minute
+   challenge window is closed on both sides.
+4. **Frontend outcome** — writes wait for `FINALIZED` and then check
+   `isSuccessful()`; a finalized-but-failed execution is surfaced as a
+   failure, not a success.
+5. **Trust boundary** — raw page content is fenced as untrusted data,
+   boolean/confidence comparison is deterministic (exact boolean, confidence
+   within 15), and source domains are unique across the whole claim
+   lifecycle (submission + dispute).
+
+Verification on this tree: `genvm-lint` passed, 99 direct tests passed,
+frontend build passed, 8 `isSuccessful`/`isFinalized` unit tests passed.
+Redeploy and the before/after balance evidence are still pending and need
+the owner's wallet confirmation first.
+
+## Steward resubmission: Studio Dev deployment (13 Nov 2026)
+
+- Deployed the fixed source on Studio Dev (chain 61997) from the Studio Dev UI, deployer 0xC2Db6830C56e7b00f2d1970762f5c2D8b7812D0e.
+- Contract: 0xD0C23F62660e68fF2A6D70369aF33CDE5822fe11, deploy tx 0x5bbd6a2e2c6ffb7978528aecc4c3c53321ae842634314f5b2b35c9c1eb7483fa, FINALIZED, gasless.
+- Live get_stats confirms challenge_period_seconds 300 and owner 0xc2db.
+- Bradbury Phase 2 redeploy still pending (faucet funding on hold).

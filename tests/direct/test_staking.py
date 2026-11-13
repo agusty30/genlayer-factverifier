@@ -43,7 +43,7 @@ def _fee(amount):
 def _mock_sources(vm, supports, confidence):
     vm.mock_web(r".*", {"status": 200, "body": "Factual content."})
     vm.mock_llm(
-        r".*Analyze whether.*",
+        r".*fact-checking analyst.*",
         json.dumps({
             "supports_claim": supports,
             "confidence": confidence,
@@ -327,8 +327,11 @@ class TestFinalize:
         contract = direct_deploy(CONTRACT_PATH)
         claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
 
-        # 1 minute in — well inside the window.
-        direct_vm.warp("2030-01-01T00:01:00+00:00")
+        # 1 minute after submission — well inside the window.
+        submitted_at = contract.get_stake_info(claim_id)["submitted_at"]
+        direct_vm.warp(
+            datetime.fromtimestamp(submitted_at + 60, tz=timezone.utc).isoformat()
+        )
         _dispute(contract, direct_vm, direct_bob, MIN_STAKE, claim_id, supports=False)
 
         info = contract.get_stake_info(claim_id)
@@ -442,3 +445,177 @@ class TestStakeViews:
         assert info["challenge_stake"] == 0
         assert info["resolved"] is False
         assert info["status"] == "verified"
+
+
+# ── Challenge window (dispute side) ───────────────────────────────────────────
+
+class TestChallengeWindow:
+
+    def test_dispute_after_challenge_period_rejected(
+        self, direct_vm, direct_deploy, direct_alice, direct_bob
+    ):
+        """A dispute after submitted_at + 300 must be rejected."""
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+        submitted_at = contract.get_stake_info(claim_id)["submitted_at"]
+
+        direct_vm.warp(
+            datetime.fromtimestamp(submitted_at + 301, tz=timezone.utc).isoformat()
+        )
+        direct_vm.clear_mocks()
+        direct_vm.sender = direct_bob
+        direct_vm.value = MIN_STAKE
+        _mock_sources(direct_vm, supports=False, confidence=90)
+        with direct_vm.expect_revert("Challenge period"):
+            contract.dispute_claim(claim_id, SOURCES_B)
+
+        assert contract.get_stake_info(claim_id)["resolved"] is False
+
+    def test_dispute_at_exact_boundary_rejected(
+        self, direct_vm, direct_deploy, direct_alice, direct_bob
+    ):
+        """The window is closed at exactly submitted_at + 300."""
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+        submitted_at = contract.get_stake_info(claim_id)["submitted_at"]
+
+        direct_vm.warp(
+            datetime.fromtimestamp(submitted_at + 300, tz=timezone.utc).isoformat()
+        )
+        direct_vm.clear_mocks()
+        direct_vm.sender = direct_bob
+        direct_vm.value = MIN_STAKE
+        _mock_sources(direct_vm, supports=False, confidence=90)
+        with direct_vm.expect_revert("Challenge period"):
+            contract.dispute_claim(claim_id, SOURCES_B)
+
+    def test_dispute_just_before_boundary_allowed(
+        self, direct_vm, direct_deploy, direct_alice, direct_bob
+    ):
+        """One second before the boundary the claim is still disputable."""
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+        submitted_at = contract.get_stake_info(claim_id)["submitted_at"]
+
+        direct_vm.warp(
+            datetime.fromtimestamp(submitted_at + 299, tz=timezone.utc).isoformat()
+        )
+        _dispute(contract, direct_vm, direct_bob, MIN_STAKE, claim_id, supports=False)
+
+        assert contract.get_stake_info(claim_id)["resolved"] is True
+
+
+# ── Payout failure / recredit ─────────────────────────────────────────────────
+
+class TestPayoutRecovery:
+
+    def test_withdraw_records_pending_and_confirm_clears(
+        self, direct_vm, direct_deploy, direct_alice, direct_bob
+    ):
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+        _dispute(contract, direct_vm, direct_bob, MIN_STAKE, claim_id, supports=False)
+
+        bob_hex = to_hex(direct_bob)
+        amount = contract.get_claimable(bob_hex)
+        assert amount > 0
+
+        direct_vm.sender = direct_bob
+        contract.withdraw()
+        assert contract.get_claimable(bob_hex) == 0
+        assert contract.get_pending_withdrawal(bob_hex) == amount
+
+        contract.confirm_withdrawal()
+        assert contract.get_pending_withdrawal(bob_hex) == 0
+
+    def test_confirm_without_pending_reverts(
+        self, direct_vm, direct_deploy, direct_charlie
+    ):
+        contract = direct_deploy(CONTRACT_PATH)
+        direct_vm.sender = direct_charlie
+        with direct_vm.expect_revert("No pending withdrawal"):
+            contract.confirm_withdrawal()
+
+    def test_recredit_failed_withdrawal_owner_only(
+        self, direct_vm, direct_deploy, direct_alice, direct_bob, direct_owner
+    ):
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+        _dispute(contract, direct_vm, direct_bob, MIN_STAKE, claim_id, supports=False)
+
+        bob_hex = to_hex(direct_bob)
+        amount = contract.get_claimable(bob_hex)
+        direct_vm.sender = direct_bob
+        contract.withdraw()
+        assert contract.get_pending_withdrawal(bob_hex) == amount
+
+        # A non-owner cannot recredit.
+        direct_vm.sender = direct_alice
+        with direct_vm.expect_revert("Only the owner can recredit"):
+            contract.recredit_failed_withdrawal(bob_hex)
+
+        # The owner cannot recredit while the transfer may still be in flight.
+        direct_vm.sender = direct_owner
+        with direct_vm.expect_revert("still in flight"):
+            contract.recredit_failed_withdrawal(bob_hex)
+
+        # After the delay, the owner can move the pending amount back.
+        direct_vm.warp("2035-01-01T00:00:00+00:00")
+        contract.recredit_failed_withdrawal(bob_hex)
+        assert contract.get_pending_withdrawal(bob_hex) == 0
+        assert contract.get_claimable(bob_hex) == amount
+
+    def test_recredit_without_pending_reverts(
+        self, direct_vm, direct_deploy, direct_owner, direct_charlie
+    ):
+        contract = direct_deploy(CONTRACT_PATH)
+        direct_vm.sender = direct_owner
+        with direct_vm.expect_revert("No pending withdrawal for this account"):
+            contract.recredit_failed_withdrawal(to_hex(direct_charlie))
+
+    def test_withdraw_treasury_records_pending(
+        self, direct_vm, direct_deploy, direct_alice, direct_bob, direct_owner
+    ):
+        contract = direct_deploy(CONTRACT_PATH)
+        claim_id = _submit(contract, direct_vm, direct_alice, MIN_STAKE)
+        _dispute(contract, direct_vm, direct_bob, MIN_STAKE, claim_id, supports=False)
+
+        fee = contract.get_treasury()
+        assert fee > 0
+        direct_vm.sender = direct_owner
+        contract.withdraw_treasury()
+        assert contract.get_treasury() == 0
+        assert contract.get_pending_withdrawal(to_hex(direct_owner)) == fee
+
+    def test_value_conservation_includes_pending(
+        self, direct_vm, direct_deploy, direct_alice, direct_bob
+    ):
+        contract = direct_deploy(CONTRACT_PATH)
+        submit_stake = MIN_STAKE * 2
+        challenge_stake = MIN_STAKE * 3
+        claim_id = _submit(contract, direct_vm, direct_alice, submit_stake)
+        _dispute(contract, direct_vm, direct_bob, challenge_stake, claim_id, supports=False)
+
+        direct_vm.sender = direct_bob
+        contract.withdraw()
+
+        bob_hex = to_hex(direct_bob)
+        total_out = (
+            contract.get_claimable(bob_hex)
+            + contract.get_pending_withdrawal(bob_hex)
+            + contract.get_treasury()
+        )
+        assert total_out == submit_stake + challenge_stake
+
+
+# ── Deployment parity views ───────────────────────────────────────────────────
+
+class TestDeploymentParity:
+
+    def test_get_stats_exposes_parity_fields(self, direct_deploy, direct_owner):
+        contract = direct_deploy(CONTRACT_PATH)
+        stats = contract.get_stats()
+        assert stats["owner"] == to_hex(direct_owner)
+        assert stats["challenge_period_seconds"] == 300
+        assert stats["min_submission_stake"] == MIN_STAKE
+        assert stats["protocol_fee_bps"] == PROTOCOL_FEE_BPS

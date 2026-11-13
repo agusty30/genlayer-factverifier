@@ -8,7 +8,7 @@ import type { FeePresetLevel } from "../genlayer/fees";
 import { useWallet } from "../genlayer/wallet";
 import { success, error, configError } from "../utils/toast";
 import type { Claim, StakeInfo, Stats, TransactionReceipt } from "../contracts/types";
-import { isFinalized } from "../contracts/types";
+import { isSuccessful } from "../contracts/types";
 
 /**
  * Get the FactVerifier contract instance.
@@ -173,13 +173,13 @@ export function useSubmitClaim() {
       invalidateAll(queryClient);
       setIsSubmitting(false);
       success(
-        isFinalized(receipt)
+        isSuccessful(receipt)
           ? "Claim submitted & finalized!"
-          : "Claim submitted (awaiting finality)",
+          : "Claim submitted (outcome not confirmed)",
         {
-          description: isFinalized(receipt)
-            ? "The oracle fetched your sources and the transaction is final on-chain."
-            : "Validators reached consensus; waiting for the finality window.",
+          description: isSuccessful(receipt)
+            ? "The oracle fetched your sources and the transaction executed successfully on-chain."
+            : "The transaction reached finality without a successful execution result.",
         }
       );
     },
@@ -240,11 +240,13 @@ export function useDisputeClaim() {
       invalidateAll(queryClient);
       setIsDisputing(false);
       success(
-        isFinalized(receipt) ? "Dispute settled (finalized)!" : "Dispute recorded (awaiting finality)",
+        isSuccessful(receipt)
+          ? "Dispute settled (finalized)!"
+          : "Dispute recorded (outcome not confirmed)",
         {
-          description: isFinalized(receipt)
+          description: isSuccessful(receipt)
             ? "Consensus validated the new evidence and stakes were settled."
-            : "Dispute accepted by validators; awaiting finality.",
+            : "The transaction reached finality without a successful execution result.",
         }
       );
     },
@@ -295,11 +297,13 @@ export function useFinalizeClaim() {
       setIsFinalizing(false);
       setFinalizingClaimId(null);
       success(
-        isFinalized(receipt) ? "Claim finalized!" : "Finalization recorded (awaiting finality)",
+        isSuccessful(receipt)
+          ? "Claim finalized!"
+          : "Finalization recorded (outcome not confirmed)",
         {
-          description: isFinalized(receipt)
+          description: isSuccessful(receipt)
             ? "Your stake is now withdrawable."
-            : "Finalization accepted by validators; awaiting finality.",
+            : "The transaction reached finality without a successful execution result.",
         }
       );
     },
@@ -347,11 +351,13 @@ export function useWithdraw() {
       invalidateAll(queryClient);
       setIsWithdrawing(false);
       success(
-        isFinalized(receipt) ? "Withdrawal complete!" : "Withdrawal recorded (awaiting finality)",
+        isSuccessful(receipt)
+          ? "Withdrawal complete!"
+          : "Withdrawal recorded (outcome not confirmed)",
         {
-          description: isFinalized(receipt)
+          description: isSuccessful(receipt)
             ? "Your balance has been transferred to your wallet."
-            : "Withdrawal accepted by validators; awaiting finality.",
+            : "The transaction reached finality without a successful execution result.",
         }
       );
     },
@@ -390,12 +396,19 @@ export function useWithdrawTreasury() {
       setIsWithdrawing(true);
       return contract.withdrawTreasury();
     },
-    onSuccess: () => {
+    onSuccess: (receipt: TransactionReceipt) => {
       invalidateAll(queryClient);
       setIsWithdrawing(false);
-      success("Treasury withdrawn!", {
-        description: "Protocol fees have been transferred to the owner.",
-      });
+      success(
+        isSuccessful(receipt)
+          ? "Treasury withdrawn!"
+          : "Treasury withdrawal recorded (outcome not confirmed)",
+        {
+          description: isSuccessful(receipt)
+            ? "Protocol fees have been transferred to the owner."
+            : "The transaction reached finality without a successful execution result.",
+        }
+      );
     },
     onError: (err: any) => {
       console.error("Error withdrawing treasury:", err);

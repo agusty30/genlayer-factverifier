@@ -30,6 +30,10 @@ the oracle is expensive and, in expectation, loss-making.
 | `MIN_SUBMISSION_STAKE` | `10**16` (0.01 GEN) | Minimum stake to submit a claim |
 | `PROTOCOL_FEE_BPS` | `500` (5%) | Fee taken from the **loser's** forfeited stake |
 | `BPS_DENOMINATOR` | `10000` | Basis-point denominator |
+| `CHALLENGE_PERIOD_SECONDS` | `300` (5 minutes) | Challenge window after submission; disputes are rejected after `submitted_at + 300`, and `finalize_claim` is refused before it |
+| `WITHDRAWAL_RECLAIM_DELAY_SECONDS` | `3600` (1 hour) | Delay before the owner may recredit a failed asynchronous payout |
+| `CHALLENGE_PERIOD_SECONDS` | `300` (5 minutes) | Challenge window after submission; disputes are rejected after `submitted_at + 300`, and `finalize_claim` is refused before it |
+| `WITHDRAWAL_RECLAIM_DELAY_SECONDS` | `3600` (1 hour) | Delay before the owner may recredit a failed asynchronous payout |
 
 Values are in the native token's smallest unit (1 GEN = `10**18`).
 
@@ -127,15 +131,24 @@ failure modes:
 - No reentrancy surface during the settlement bookkeeping.
 
 `withdraw()` follows **checks-effects-interactions**: it zeroes the caller's
-balance *before* emitting the transfer.
+balance *before* emitting the transfer, through `_emit_payout()`, which uses
+the documented EOA transfer mechanism (`_EoaRecipient(...).emit_transfer()`).
+Every emitted payout is also recorded in `pending_withdrawals` (with its
+timestamp in `pending_withdrawal_since`) until the recipient confirms receipt
+with `confirm_withdrawal()`.
 
-```python
-amount = int(self.claimable.get(sender, u256(0)))
-if amount <= 0:
-    raise gl.vm.UserError("Nothing to withdraw")
-self.claimable[sender] = u256(0)          # effect first
-gl.get_contract_at(sender).emit_transfer(value=u256(amount))  # then interaction
-```
+Because the transfer executes asynchronously, a failed child message does not
+automatically return the value. Two recovery paths cover that case:
+
+- **Synchronous emission failure:** if `emit_transfer` itself errors,
+  `_emit_payout()` restores the caller's `claimable` balance immediately, so
+  the caller can withdraw again.
+- **Asynchronous failure:** if the transfer was emitted but the recipient's
+  balance did not increase, the owner can call
+  `recredit_failed_withdrawal(account)` to return the pending amount to that
+  account's `claimable` balance. It is owner-only, and it refuses until
+  `WITHDRAWAL_RECLAIM_DELAY_SECONDS` (3600s) have passed since the payout,
+  so a still-in-flight transfer is never recredited prematurely.
 
 ## Treasury
 
@@ -166,15 +179,17 @@ Bob then calls `withdraw()` and receives 0.0195 GEN; the owner can later call
    settlement deterministic and the game simple. Escalation games (dispute of a
    dispute, bonded appeal ladders) are future work.
 
-2. **Time-locked challenge window (enforced).** The contract stores a
-   `submitted_at` epoch-seconds timestamp on every claim and refuses
-   `finalize_claim` until `CHALLENGE_PERIOD_SECONDS` (300s = 5 minutes) have
-   elapsed. The timestamp is read from the consensus-injected transaction
-   context (`gl.message_raw['datetime']`), so it is identical for all
-   validators and not influenced by the submitter's local clock. During the
-   challenge window anyone may call `dispute_claim`, which settles the claim
-   immediately regardless of when in the window it is called. After the
-   window passes, the submitter is the only party who can settle (via
+2. **Time-locked challenge window (enforced on both sides).** The contract
+   stores a `submitted_at` epoch-seconds timestamp on every claim. The window
+   is closed at `submitted_at + CHALLENGE_PERIOD_SECONDS` (300s = 5 minutes),
+   and the contract enforces it in both directions: `dispute_claim` is
+   rejected after the window has elapsed, and `finalize_claim` is refused
+   until it has elapsed. The timestamp is read from the consensus-injected
+   transaction context (`gl.message_raw['datetime']`), so it is identical for
+   all validators and not influenced by the submitter's local clock. During
+   the challenge window anyone may call `dispute_claim`, which settles the
+   claim immediately regardless of when in the window it is called. After
+   the window passes, the submitter is the only party who can settle (via
    `finalize_claim`).
    The 5-minute window is short enough for fast UX, long enough that a
    challenger can observe a freshly-submitted claim on a public explorer and
@@ -184,7 +199,8 @@ Bob then calls `withdraw()` and receives 0.0195 GEN; the owner can later call
    in-flight claims on the day of redeploy.
 
 3. **Withdrawal to reverting contracts.** `withdraw()` zeroes the ledger before
-   transferring (CEI). If the recipient is a contract that rejects the transfer,
-   the emitted message errors and the value is refunded to this contract via the
-   SDK's `__on_errored_message__` path; EOA recipients (the common case) are
-   unaffected. A re-credit-on-failure escrow is future work.
+   transferring (CEI) and records the payout as pending. If the recipient is a
+   contract that rejects the transfer, the synchronous emission failure is
+   rolled back into `claimable` immediately; an asynchronously failed transfer
+   is recovered with `recredit_failed_withdrawal()` (owner-only, after the
+   3600s reclaim delay). EOA recipients (the common case) are unaffected.

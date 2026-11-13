@@ -82,14 +82,17 @@ Disputes are **economically staked** — the challenger must lock at least the
 submitter's original stake (see [economic-security.md](economic-security.md)).
 The dispute process:
 
-1. The challenge stake is checked (must be ≥ the submission stake)
-2. New sources are analyzed with the same consensus mechanism (only the new
+1. The challenge window is checked: disputes are rejected after
+   `submitted_at + CHALLENGE_PERIOD_SECONDS` (300s), so the five-minute
+   challenge window is a closed window, not an open-ended one
+2. The challenge stake is checked (must be ≥ the submission stake)
+3. New sources are analyzed with the same consensus mechanism (only the new
    sources go through consensus validation; previously consensus-validated
    sources keep their cached `(supports_claim, confidence)` records)
-3. The newly validated results are re-aggregated with the previously
+4. The newly validated results are re-aggregated with the previously
    consensus-validated results
-4. Status may change based on the new aggregate score
-5. **Settlement:** if the verdict flipped, the dispute *succeeds* and the
+5. Status may change based on the new aggregate score
+6. **Settlement:** if the verdict flipped, the dispute *succeeds* and the
    challenger wins; if it held, the submitter wins. The winner is credited their
    own stake plus the loser's stake minus a 5% protocol fee, and the claim is
    marked `resolved` (it can never be disputed again)

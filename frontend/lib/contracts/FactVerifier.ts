@@ -1,6 +1,7 @@
 import { createClient } from "genlayer-js";
 import { TransactionStatus } from "genlayer-js/types";
 import { activeChain, getStudioUrl, getEthereumProvider } from "../genlayer/client";
+import { isSuccessful } from "./types";
 import type {
   Claim,
   ClaimStatus,
@@ -366,6 +367,34 @@ class FactVerifier {
   // ── Writes ───────────────────────────────────────────────────────────────
 
   /**
+   * Wait for full finality, then assert the transaction actually executed
+   * successfully. A FINALIZED receipt can still carry a failed execution
+   * result, so lifecycle state alone is not a success signal.
+   */
+  private async waitForFinalizedSuccess(
+    txHash: any,
+    action: string
+  ): Promise<TransactionReceipt> {
+    const receipt = (await this.client.waitForTransactionReceipt({
+      hash: txHash,
+      // Wait for full finality so callers never see an ACCEPTED receipt that
+      // later reverts during the appeal window.
+      status: TransactionStatus.FINALIZED,
+      retries: 60,
+      interval: 5000,
+    })) as TransactionReceipt;
+
+    if (!isSuccessful(receipt)) {
+      throw new Error(
+        `${action} transaction ${String(txHash)} reached finality but did not execute successfully ` +
+          `(status: ${receipt?.statusName ?? receipt?.status ?? "unknown"}, ` +
+          `execution: ${receipt?.txExecutionResultName ?? receipt?.txExecutionResult ?? "unknown"}).`
+      );
+    }
+    return receipt;
+  }
+
+  /**
    * Submit a claim with a stake (payable). The stake is sent as the call
    * value; the contract fetches every source and runs per-source LLM analysis
    * under the equivalence principle before returning.
@@ -388,15 +417,7 @@ class FactVerifier {
         ...(fees ? { fees } : {}),
       });
 
-      const receipt = await this.client.waitForTransactionReceipt({
-        hash: txHash,
-        // Wait for full finality so callers never see an ACCEPTED receipt
-        // that later reverts during the appeal window.
-        status: TransactionStatus.FINALIZED,
-        retries: 60,
-        interval: 5000,
-      });
-      return receipt as TransactionReceipt;
+      return this.waitForFinalizedSuccess(txHash, "Submit claim");
     } catch (error) {
       console.error("Error submitting claim:", error);
       throw error;
@@ -423,15 +444,7 @@ class FactVerifier {
         ...(fees ? { fees } : {}),
       });
 
-      const receipt = await this.client.waitForTransactionReceipt({
-        hash: txHash,
-        // Wait for full finality so callers never see an ACCEPTED receipt
-        // that later reverts during the appeal window.
-        status: TransactionStatus.FINALIZED,
-        retries: 60,
-        interval: 5000,
-      });
-      return receipt as TransactionReceipt;
+      return this.waitForFinalizedSuccess(txHash, "Dispute claim");
     } catch (error) {
       console.error("Error disputing claim:", error);
       throw error;
@@ -453,15 +466,7 @@ class FactVerifier {
         ...(fees ? { fees } : {}),
       });
 
-      const receipt = await this.client.waitForTransactionReceipt({
-        hash: txHash,
-        // Wait for full finality so callers never see an ACCEPTED receipt
-        // that later reverts during the appeal window.
-        status: TransactionStatus.FINALIZED,
-        retries: 60,
-        interval: 5000,
-      });
-      return receipt as TransactionReceipt;
+      return this.waitForFinalizedSuccess(txHash, "Finalize claim");
     } catch (error) {
       console.error("Error finalizing claim:", error);
       throw error;
@@ -480,15 +485,7 @@ class FactVerifier {
         ...(fees ? { fees } : {}),
       });
 
-      const receipt = await this.client.waitForTransactionReceipt({
-        hash: txHash,
-        // Wait for full finality so callers never see an ACCEPTED receipt
-        // that later reverts during the appeal window.
-        status: TransactionStatus.FINALIZED,
-        retries: 60,
-        interval: 5000,
-      });
-      return receipt as TransactionReceipt;
+      return this.waitForFinalizedSuccess(txHash, "Withdraw");
     } catch (error) {
       console.error("Error withdrawing:", error);
       throw error;
@@ -509,15 +506,7 @@ class FactVerifier {
         ...(fees ? { fees } : {}),
       });
 
-      const receipt = await this.client.waitForTransactionReceipt({
-        hash: txHash,
-        // Wait for full finality so callers never see an ACCEPTED receipt
-        // that later reverts during the appeal window.
-        status: TransactionStatus.FINALIZED,
-        retries: 60,
-        interval: 5000,
-      });
-      return receipt as TransactionReceipt;
+      return this.waitForFinalizedSuccess(txHash, "Withdraw treasury");
     } catch (error) {
       console.error("Error withdrawing treasury:", error);
       throw error;

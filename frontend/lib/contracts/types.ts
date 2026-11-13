@@ -1,5 +1,5 @@
 import type { GenLayerTransaction } from "genlayer-js/types";
-import { TransactionStatus } from "genlayer-js/types";
+import { ExecutionResult, TransactionStatus } from "genlayer-js/types";
 
 /**
  * Re-export the SDK's GenLayerTransaction as the canonical receipt type for
@@ -28,11 +28,45 @@ export { TransactionStatus };
  * (FINALIZED).
  */
 export function isFinalized(receipt: TransactionReceipt): boolean {
-  return receipt?.status === TransactionStatus.FINALIZED;
+  if (!receipt) return false;
+  return (
+    receipt.statusName === TransactionStatus.FINALIZED ||
+    receipt.status === TransactionStatus.FINALIZED
+  );
 }
 
 export function isAccepted(receipt: TransactionReceipt): boolean {
-  return receipt?.status === TransactionStatus.ACCEPTED;
+  if (!receipt) return false;
+  return (
+    receipt.statusName === TransactionStatus.ACCEPTED ||
+    receipt.status === TransactionStatus.ACCEPTED
+  );
+}
+
+/**
+ * Predicate: did the transaction both reach finality AND execute successfully?
+ *
+ * Lifecycle state alone is not enough: a FINALIZED transaction can still carry
+ * a failed execution result (for example, the contract reverted). The
+ * authoritative outcome is `txExecutionResultName`; `txExecutionResult === 1`
+ * is the numeric fallback for older receipts.
+ */
+export function isSuccessful(receipt: TransactionReceipt): boolean {
+  if (!receipt || !isFinalized(receipt)) return false;
+  if (receipt.txExecutionResultName) {
+    return receipt.txExecutionResultName === ExecutionResult.FINISHED_WITH_RETURN;
+  }
+  return receipt.txExecutionResult === 1;
+}
+
+/** Human-readable outcome, for toasts and error messages. */
+export function describeOutcome(receipt: TransactionReceipt): string {
+  if (!receipt) return "unknown";
+  if (!isFinalized(receipt)) return "not finalized";
+  if (isSuccessful(receipt)) return "finalized and executed successfully";
+  return `finalized but execution failed (${
+    receipt.txExecutionResultName ?? receipt.txExecutionResult ?? "unknown"
+  })`;
 }
 
 // ── Domain types ────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 {
-  "name": "GenLayer Football Market",
-  "short_name": "GenLayer Market",
-  "description": "AI-powered football match predictions on GenLayer blockchain",
+  "name": "FactVerifier — GenLayer Fact-Checking Oracle",
+  "short_name": "FactVerifier",
+  "description": "AI-powered cross-source fact verification on GenLayer.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
