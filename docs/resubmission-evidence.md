@@ -91,3 +91,24 @@ The fixed source was deployed from the Studio Dev UI (studio-dev.genlayer.com) w
 - Live get_stats: challenge_period_seconds 300, min_submission_stake 10000000000000000 (0.01 GEN), owner 0xC2Db6830C56e7b00f2d1970762f5c2D8b7812D0e, protocol_fee_bps 500, total_claims 0, total_disputes 0, total_refuted 0, total_staked 0, total_verified 0, treasury 0
 
 Note: this is a Studio Dev deployment (chain 61997), not Bradbury Phase 2 (chain 4221). The Bradbury redeploy and the on-chain payout before/after evidence are still pending the Phase 2 faucet funding (0.01 ETH on Ethereum mainnet for wallet 0xc2db).
+
+## Steward follow-up, 16 Nov 2026: tracked confirm_withdrawal client flow
+
+The resubmission (id 294f4481-927f-49db-ae8d-2ef1d38ea8aa) was reviewed 16 Nov 2026 and moved to Action needed. The steward asked for a tracked client and user flow that invokes the existing `confirm_withdrawal` method after the recipient verifies a successful payout, clears the pending payout record, and does not present parent-transaction finality as proof that the asynchronous transfer completed. Response deadline: 30 Nov 2026.
+
+Implemented in this tree (commit to be recorded on push):
+
+- `frontend/lib/contracts/FactVerifier.ts`: `getPendingWithdrawal()` (reads `get_pending_withdrawal`), `getNativeBalance()` (reads the wallets native GEN balance, the ground truth for receipt), `confirmWithdrawal()` and `estimateConfirmWithdrawalFees()` (write `confirm_withdrawal`, waiting for FINALIZED + `isSuccessful`).
+- `frontend/lib/contracts/withdrawal.ts`: pure verification rule `verifyPayoutReceived(baseline, current, pending)` (true only when the balance grew by at least the pending amount), `payoutDelta()`, and a localStorage `WithdrawalRecord` (baseline captured before the withdraw, so the tracker survives a reload).
+- `frontend/lib/hooks/useFactVerifier.ts`: `usePendingWithdrawal()`, `useNativeBalance()` (re-polls every 5s while a payout is pending), `useConfirmWithdrawal()` (re-reads the pending record after confirming and only then clears the local record). `useWithdraw()` now captures the baseline balance before sending the withdraw and no longer toasts "Your balance has been transferred to your wallet"; the success message says the transfer was emitted and receipt is not yet verified.
+- `frontend/components/WithdrawalTracker.tsx`: the tracked three-step user flow (1. withdrawal emitted, with the explicit note that finality proves only emission; 2. verify the payout landed, showing pending amount, baseline, current balance and growth; 3. confirm receipt, enabled only after verification, then the pending record reads cleared). Wired into `ClaimablePanel`.
+- `frontend/lib/contracts/withdrawal.test.ts`: 12 vitest tests for the verification rule (balance growth, no growth, negative delta clamped, missing baseline, no pending payout).
+
+Verification on this tree (16 Nov 2026):
+
+- `npx tsc --noEmit` (frontend): passed, no type errors.
+- `npx vitest run lib/contracts/withdrawal.test.ts lib/contracts/types.test.ts`: 20 passed (12 + 8).
+- `npm run build` (frontend): compiles successfully. The build workers TypeScript phase is killed (SIGKILL) on this Box (3.8 GiB RAM, ~1 GiB free, no swap); the same failure reproduces on the clean tree at 02e6bec, so it is a pre-existing Box resource limit, not a regression from this change. The standalone `tsc --noEmit` above is the type check.
+- Contract-level `confirm_withdrawal` behaviour is covered by `tests/direct/test_staking.py::test_withdraw_records_pending_and_confirm_clears` and `test_confirm_without_pending_reverts` (99 direct tests passed 10 Nov on genlayer-py 0.18.0; the RC toolchain in `.venv` cannot import them, see the RC verdict in STEWARD_FIX.md).
+
+Still pending (blocked on faucet funding, user decision 10 Nov: on hold, no ETH): the Bradbury Phase 2 redeploy and a full on-chain payout lifecycle (staked claim, settlement, withdraw, balance before/after, confirm_withdrawal, pending before/after) on Bradbury. The client flow above is deployment-agnostic and works against the configured contract; the Studio Dev contract (0xD0C23F62660e68fF2A6D70369aF33CDE5822fe11, chain 61997) already exposes `get_pending_withdrawal` and `confirm_withdrawal`.

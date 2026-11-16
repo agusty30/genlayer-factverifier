@@ -166,3 +166,10 @@ the owner's wallet confirmation first.
 - Contract: 0xD0C23F62660e68fF2A6D70369aF33CDE5822fe11, deploy tx 0x5bbd6a2e2c6ffb7978528aecc4c3c53321ae842634314f5b2b35c9c1eb7483fa, FINALIZED, gasless.
 - Live get_stats confirms challenge_period_seconds 300 and owner 0xc2db.
 - Bradbury Phase 2 redeploy still pending (faucet funding on hold).
+
+## Steward follow-up: tracked confirm_withdrawal client flow (16 Nov 2026)
+
+- Resubmission 294f4481 reviewed 16 Nov 2026, status Action needed, respond by 30 Nov 2026. Steward asked for a tracked client and user flow invoking the existing `confirm_withdrawal` after the recipient verifies a successful payout, clearing the pending record, without presenting parent-transaction finality as proof the async transfer completed.
+- Built: `WithdrawalTracker` component (three tracked steps, confirm gated on balance-verified receipt), `getPendingWithdrawal` / `getNativeBalance` / `confirmWithdrawal` in the contract binding, `usePendingWithdrawal` / `useNativeBalance` (5s re-poll while pending) / `useConfirmWithdrawal` hooks, and the pure `verifyPayoutReceived` rule in `lib/contracts/withdrawal.ts`. `useWithdraw` no longer claims the balance was transferred on finality.
+- Verification: `tsc --noEmit` passed; vitest 20 passed (12 withdrawal + 8 types); `next build` compiles, its TypeScript worker is SIGKILLed by the Boxs 1 GiB free RAM (reproduces on the clean tree, pre-existing). Docs updated in `docs/economic-security.md` and `docs/resubmission-evidence.md`.
+- Still pending: Bradbury redeploy + full on-chain payout lifecycle evidence (faucet funding on hold).

@@ -150,6 +150,40 @@ automatically return the value. Two recovery paths cover that case:
   `WITHDRAWAL_RECLAIM_DELAY_SECONDS` (3600s) have passed since the payout,
   so a still-in-flight transfer is never recredited prematurely.
 
+### Withdrawal lifecycle in the client
+
+The parent `withdraw()` transaction reaching finality proves only that the
+transfer was **emitted**, never that the recipient **received** it. The
+frontend therefore never presents finality as proof of receipt. The tracked
+flow in `frontend/components/WithdrawalTracker.tsx` is:
+
+1. **Emit.** The user clicks Withdraw. Before the transaction is sent, the
+   hook captures the recipients native GEN balance as a baseline and records
+   it (with the withdrawn amount and the transaction hash) in localStorage,
+   so the tracker survives a page reload.
+2. **Verify.** The tracker reads `get_pending_withdrawal()` (the amount the
+   contract still holds as unconfirmed) and re-polls the recipients native
+   GEN balance every 5 seconds while a payout is pending. The payout counts
+   as received only when the balance has grown by at least the pending
+   amount (`verifyPayoutReceived` in
+   `frontend/lib/contracts/withdrawal.ts`). Balance growth is the only
+   receipt proof; the parent transactions finality is explicitly not one.
+3. **Confirm.** The Confirm receipt button stays disabled until receipt is
+   verified, then calls `confirm_withdrawal()`, which clears the contracts
+   pending-withdrawal record. The client re-reads `get_pending_withdrawal()`
+   afterwards and only then reports the lifecycle complete.
+4. **Failure path.** If the balance has not grown and more than
+   `WITHDRAWAL_RECLAIM_DELAY_SECONDS` (3600s) have passed since the payout
+   was emitted, the tracker explains that the transfer may have failed
+   asynchronously and that the owner can recredit it after verifying the
+   failure on the explorer. If the baseline was never captured, the user must
+   explicitly confirm they checked their balance on the explorer before the
+   confirm button is enabled.
+
+The verification rule is unit-tested in
+`frontend/lib/contracts/withdrawal.test.ts` (12 tests) alongside the
+receipt-outcome helpers in `frontend/lib/contracts/types.test.ts`.
+
 ## Treasury
 
 Protocol fees accumulate in `treasury` and are withdrawable only by `owner`

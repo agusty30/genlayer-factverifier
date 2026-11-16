@@ -11,6 +11,7 @@ import {
   useWithdrawTreasury,
 } from "@/lib/hooks/useFactVerifier";
 import { Button } from "./ui/button";
+import { WithdrawalTracker } from "./WithdrawalTracker";
 
 function gen(wei: bigint | string | undefined | null): string {
   if (wei === undefined || wei === null) return "0";
@@ -36,7 +37,8 @@ export function ClaimablePanel() {
   const treasury = stats?.treasury ?? 0n;
 
   return (
-    <div className="brand-card p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+    <>
+      <div className="brand-card p-4 flex flex-col sm:flex-row sm:items-center gap-4">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-full bg-accent/15 flex items-center justify-center flex-shrink-0">
           <Wallet className="w-5 h-5 text-accent" />
@@ -90,6 +92,8 @@ export function ClaimablePanel() {
           </Button>
         </div>
       )}
-    </div>
+      </div>
+      <WithdrawalTracker />
+    </>
   );
 }

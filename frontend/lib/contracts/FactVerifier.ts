@@ -277,6 +277,38 @@ class FactVerifier {
     return toBigInt(raw);
   }
 
+  /**
+   * The callers emitted-but-unconfirmed payout, in wei.
+   *
+   * A nonzero value means a `withdraw()` was emitted and the asynchronous
+   * EOA transfer has not been confirmed received yet. The recipient clears
+   * it with `confirmWithdrawal()` only after verifying the payout actually
+   * landed in their wallet balance (see `getNativeBalance`).
+   */
+  async getPendingWithdrawal(account: string | null): Promise<bigint> {
+    if (!account) return 0n;
+    const raw = await this.client.readContract({
+      address: this.contractAddress,
+      functionName: "get_pending_withdrawal",
+      args: [account],
+    });
+    return toBigInt(raw);
+  }
+
+  /**
+   * The accounts native GEN balance, in wei.
+   *
+   * This is the ground truth for payout verification: an asynchronous
+   * payout is confirmed received only when this balance has increased by
+   * the pending amount. The parent `withdraw()` transaction reaching
+   * finality proves only that the transfer was emitted, never that the
+   * recipient received it.
+   */
+  async getNativeBalance(account: string | null): Promise<bigint> {
+    if (!account) return 0n;
+    return this.client.getBalance({ address: account as `0x${string}` });
+  }
+
   async getTreasury(): Promise<bigint> {
     const raw = await this.client.readContract({
       address: this.contractAddress,
@@ -358,6 +390,20 @@ class FactVerifier {
       {
         address: this.contractAddress,
         functionName: "withdraw",
+        args: [],
+      },
+      level
+    );
+  }
+
+  async estimateConfirmWithdrawalFees(
+    level: FeePresetLevel = "standard"
+  ): Promise<FeePresetEstimate | undefined> {
+    return estimateWriteFeePreset(
+      this.client,
+      {
+        address: this.contractAddress,
+        functionName: "confirm_withdrawal",
         args: [],
       },
       level
@@ -488,6 +534,36 @@ class FactVerifier {
       return this.waitForFinalizedSuccess(txHash, "Withdraw");
     } catch (error) {
       console.error("Error withdrawing:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Confirm receipt of an emitted payout and clear the pending record.
+   *
+   * Call this only after the recipient has verified, from their own wallet
+   * balance, that the asynchronous transfer actually landed (see
+   * `getNativeBalance`). The parent `withdraw()` transaction reaching
+   * finality proves only that the transfer was emitted, never that the
+   * recipient received it, so this method must never be invoked on the
+   * strength of parent-transaction finality alone.
+   */
+  async confirmWithdrawal(
+    feePreset?: FeePresetEstimate
+  ): Promise<TransactionReceipt> {
+    try {
+      const fees = feePresetToTransactionFees(feePreset);
+      const txHash = await this.client.writeContract({
+        address: this.contractAddress,
+        functionName: "confirm_withdrawal",
+        args: [],
+        value: BigInt(0),
+        ...(fees ? { fees } : {}),
+      });
+
+      return this.waitForFinalizedSuccess(txHash, "Confirm withdrawal");
+    } catch (error) {
+      console.error("Error confirming withdrawal:", error);
       throw error;
     }
   }

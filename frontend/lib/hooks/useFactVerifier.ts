@@ -9,6 +9,11 @@ import { useWallet } from "../genlayer/wallet";
 import { success, error, configError } from "../utils/toast";
 import type { Claim, StakeInfo, Stats, TransactionReceipt } from "../contracts/types";
 import { isSuccessful } from "../contracts/types";
+import {
+  clearWithdrawalRecord,
+  saveWithdrawalRecord,
+  type WithdrawalRecord,
+} from "../contracts/withdrawal";
 
 /**
  * Get the FactVerifier contract instance.
@@ -96,6 +101,54 @@ export function useClaimable(address: string | null) {
   });
 }
 
+/**
+ * The connected wallets emitted-but-unconfirmed payout, in wei.
+ *
+ * Nonzero while a `withdraw()` transfer is still awaiting receipt
+ * confirmation. Cleared only by `confirmWithdrawal()` after the recipient
+ * verifies the payout landed in their wallet balance.
+ */
+export function usePendingWithdrawal(address: string | null) {
+  const contract = useFactVerifierContract();
+
+  return useQuery<bigint, Error>({
+    queryKey: ["pendingWithdrawal", address],
+    queryFn: () =>
+      contract && address
+        ? contract.getPendingWithdrawal(address)
+        : Promise.resolve(0n),
+    refetchOnWindowFocus: true,
+    staleTime: 2000,
+    enabled: !!contract && !!address,
+  });
+}
+
+/**
+ * The connected wallets native GEN balance, in wei.
+ *
+ * This is the ground truth for payout verification. While a withdrawal is
+ * pending, the balance is re-polled every 5 seconds so the tracker can
+ * detect the moment the asynchronous transfer lands.
+ */
+export function useNativeBalance(
+  address: string | null,
+  pollWhilePending = false
+) {
+  const contract = useFactVerifierContract();
+
+  return useQuery<bigint, Error>({
+    queryKey: ["nativeBalance", address],
+    queryFn: () =>
+      contract && address
+        ? contract.getNativeBalance(address)
+        : Promise.resolve(0n),
+    refetchOnWindowFocus: true,
+    staleTime: 2000,
+    refetchInterval: pollWhilePending ? 5000 : false,
+    enabled: !!contract && !!address,
+  });
+}
+
 /** The contract owner (fee recipient). */
 export function useOwner() {
   const contract = useFactVerifierContract();
@@ -115,6 +168,8 @@ function invalidateAll(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["claims"] });
   queryClient.invalidateQueries({ queryKey: ["stakeInfo"] });
   queryClient.invalidateQueries({ queryKey: ["claimable"] });
+  queryClient.invalidateQueries({ queryKey: ["pendingWithdrawal"] });
+  queryClient.invalidateQueries({ queryKey: ["nativeBalance"] });
   queryClient.invalidateQueries({ queryKey: ["owner"] });
 }
 
@@ -326,7 +381,17 @@ export function useFinalizeClaim() {
   };
 }
 
-/** Withdraw the caller's accumulated balance (pull-payment). */
+/**
+ * Withdraw the caller's accumulated balance (pull-payment).
+ *
+ * The payout is asynchronous: `withdraw()` only EMITS the transfer. The
+ * parent transaction reaching finality does NOT prove the recipient
+ * received the funds, so the success toast deliberately does not claim a
+ * completed transfer. Instead, the hook captures the recipients native
+ * balance BEFORE the withdraw and records it (with the withdrawn amount)
+ * so the WithdrawalTracker can verify receipt from the actual balance
+ * growth and then offer `confirmWithdrawal()`.
+ */
 export function useWithdraw() {
   const contract = useFactVerifierContract();
   const { address } = useWallet();
@@ -344,19 +409,38 @@ export function useWithdraw() {
         );
       }
       setIsWithdrawing(true);
+      // Capture the baseline BEFORE the transfer is emitted: the tracker
+      // proves receipt by comparing this against the balance afterwards.
+      const baselineWei = await contract.getNativeBalance(address);
+      const amountWei = await contract.getClaimable(address);
       const feePreset = await contract.estimateWithdrawFees();
-      return contract.withdraw(feePreset);
+      const receipt = await contract.withdraw(feePreset);
+      return { receipt, baselineWei, amountWei };
     },
-    onSuccess: (receipt: TransactionReceipt) => {
+    onSuccess: ({ receipt, baselineWei, amountWei }) => {
       invalidateAll(queryClient);
       setIsWithdrawing(false);
+      if (isSuccessful(receipt) && address) {
+        const record: WithdrawalRecord = {
+          address,
+          baselineWei: baselineWei.toString(),
+          amountWei: amountWei.toString(),
+          txHash: String(
+            (receipt as any)?.hash ??
+              (receipt as any)?.transactionHash ??
+              ""
+          ),
+          emittedAt: Math.floor(Date.now() / 1000),
+        };
+        saveWithdrawalRecord(record);
+      }
       success(
         isSuccessful(receipt)
-          ? "Withdrawal complete!"
+          ? "Withdrawal emitted, receipt not yet verified"
           : "Withdrawal recorded (outcome not confirmed)",
         {
           description: isSuccessful(receipt)
-            ? "Your balance has been transferred to your wallet."
+            ? "The transfer was emitted. It is NOT confirmed received until your wallet balance grows by the withdrawn amount, verify it in the withdrawal tracker, then confirm receipt."
             : "The transaction reached finality without a successful execution result.",
         }
       );
@@ -375,6 +459,73 @@ export function useWithdraw() {
     isWithdrawing,
     withdraw: mutation.mutate,
     withdrawAsync: mutation.mutateAsync,
+  };
+}
+
+/**
+ * Confirm receipt of an emitted payout and clear the pending record.
+ *
+ * The caller (the WithdrawalTracker) enables this only after verifying,
+ * from the recipients own wallet balance, that the asynchronous transfer
+ * actually landed. On success the pending record is re-read and the local
+ * tracker record is cleared.
+ */
+export function useConfirmWithdrawal() {
+  const contract = useFactVerifierContract();
+  const { address } = useWallet();
+  const queryClient = useQueryClient();
+  const [isConfirming, setIsConfirming] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!contract) {
+        throw new Error("Contract not configured.");
+      }
+      if (!address) {
+        throw new Error(
+          "Wallet not connected. Please connect your wallet to confirm receipt."
+        );
+      }
+      setIsConfirming(true);
+      const feePreset = await contract.estimateConfirmWithdrawalFees();
+      return contract.confirmWithdrawal(feePreset);
+    },
+    onSuccess: async (receipt: TransactionReceipt) => {
+      if (isSuccessful(receipt) && address) {
+        // Re-read the pending record: a successful confirm must have
+        // cleared it. Only then drop the local tracker record.
+        const stillPending = await contract!.getPendingWithdrawal(address);
+        if (stillPending === 0n) {
+          clearWithdrawalRecord(address);
+        }
+      }
+      invalidateAll(queryClient);
+      setIsConfirming(false);
+      success(
+        isSuccessful(receipt)
+          ? "Receipt confirmed, pending record cleared"
+          : "Confirmation recorded (outcome not confirmed)",
+        {
+          description: isSuccessful(receipt)
+            ? "The pending withdrawal record is cleared. The payout lifecycle is complete."
+            : "The transaction reached finality without a successful execution result.",
+        }
+      );
+    },
+    onError: (err: any) => {
+      console.error("Error confirming withdrawal:", err);
+      setIsConfirming(false);
+      error("Failed to confirm receipt", {
+        description: err?.message || "Please try again.",
+      });
+    },
+  });
+
+  return {
+    ...mutation,
+    isConfirming,
+    confirmWithdrawal: mutation.mutate,
+    confirmWithdrawalAsync: mutation.mutateAsync,
   };
 }
 
