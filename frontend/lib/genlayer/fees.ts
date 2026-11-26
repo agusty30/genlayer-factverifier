@@ -74,17 +74,23 @@ export async function estimateWriteFeePreset(
     typeof client.simulateWriteContract === "function" &&
     typeof client.estimateTransactionFeesFromSimulation === "function"
   ) {
-    const simulation = await client.simulateWriteContract({
-      ...request,
-      includeReceipt: true,
-      value: request.value ?? 0n,
-      fees: transactionFeesFromEstimate(initialEstimate),
-    });
+    try {
+      const simulation = await client.simulateWriteContract({
+        ...request,
+        includeReceipt: true,
+        value: request.value ?? 0n,
+        fees: transactionFeesFromEstimate(initialEstimate),
+      });
 
-    estimate = await client.estimateTransactionFeesFromSimulation({
-      ...options,
-      simulation,
-    });
+      estimate = await client.estimateTransactionFeesFromSimulation({
+        ...options,
+        simulation,
+      });
+    } catch {
+      // The simulation-based refinement is not supported on every network:
+      // Studio Dev rejects sim_estimateTransactionFees with an internal
+      // error. Fall back to the plain estimate, which is sufficient.
+    }
   }
 
   return {

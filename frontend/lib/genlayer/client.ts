@@ -48,12 +48,18 @@ function hostOf(url: string): string {
 /**
  * Resolve the genlayer-js chain object to drive the SDK client.
  *
- * genlayer-js bundles several named chains (studionet, localnet, testnetAsimov,
- * testnetBradbury…). IMPORTANT: multiple GenLayer testnets currently share the
- * same numeric `id` (both Asimov and Bradbury report id 4221) while carrying
- * DIFFERENT consensus-contract addresses and RPC URLs — and genlayer-js builds
- * *writes* against the chain's consensus contracts. Matching on `id` alone is
- * therefore ambiguous and can silently target the wrong network's contracts.
+ * genlayer-js bundles several named chains (studionet, studioDevnet,
+ * localnet, testnetAsimov, testnetBradbury…). IMPORTANT: multiple GenLayer
+ * testnets currently share the same numeric `id` (both Asimov and Bradbury
+ * report id 4221) while carrying DIFFERENT consensus-contract addresses
+ * and RPC URLs — and genlayer-js builds *writes* against the chain's
+ * consensus contracts. Matching on `id` alone is therefore ambiguous and
+ * can silently target the wrong network's contracts.
+ *
+ * genlayer-js v2 also warns against synthesizing a chain from `studionet`
+ * for Studio Dev: the bundled `studioDevnet` (id 61997) is the correct
+ * chain there. Synthesis (step 4) is kept only as a last resort for a
+ * local Studio / unrecognized custom RPC.
  *
  * We resolve in priority order:
  *   1. explicit `NEXT_PUBLIC_GENLAYER_CHAIN_KEY` (exact genlayer-js export name),

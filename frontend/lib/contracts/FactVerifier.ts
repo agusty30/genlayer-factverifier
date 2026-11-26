@@ -1,5 +1,4 @@
 import { createClient } from "genlayer-js";
-import { TransactionStatus } from "genlayer-js/types";
 import { activeChain, getStudioUrl, getEthereumProvider } from "../genlayer/client";
 import { isSuccessful } from "./types";
 import type {
@@ -425,7 +424,7 @@ class FactVerifier {
       hash: txHash,
       // Wait for full finality so callers never see an ACCEPTED receipt that
       // later reverts during the appeal window.
-      status: TransactionStatus.FINALIZED,
+      waitUntil: "finalized",
       retries: 60,
       interval: 5000,
     })) as TransactionReceipt;
