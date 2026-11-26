@@ -77,7 +77,7 @@ curl -s "https://genlayer-factverifier.vercel.app/api/claim/claim_1"
 ## Funding a payer wallet (testnet)
 
 - USDC on Base Sepolia: Circle faucet at https://faucet.circle.com
-  (20 USDC per address per chain, every 2 hours, no account). Pick
+  (10 USDC per claim, verified 26 Nov 2026; no account). Pick
   **Base Sepolia**. The correct USDC contract is
   `0x036CbD53842c5426634e7929541eC2318f3dCF7e`.
 - ETH on Base Sepolia (gas): any Base Sepolia ETH faucet. Only a tiny
