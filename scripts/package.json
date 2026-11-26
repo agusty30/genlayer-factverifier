@@ -1,0 +1,1 @@
+{"bin":{"x402-demo-client":"./x402-demo-client.mjs"},"dependencies":{"@x402/evm":"^2.32.0","@x402/fetch":"^2.32.0","viem":"2.21.54"},"description":"Demo client for the FactVerifier x402 pay-per-verdict API (Base Sepolia USDC -> GenLayer Studio Dev verdict).","name":"factverifier-x402-demo-client","private":true,"type":"module","version":"1.0.0"}

@@ -86,9 +86,18 @@ export function Navbar() {
             >
               {/* Left: Logo */}
               <div className="flex items-center gap-3">
-                {/* Show mark only on mobile, full logo on desktop */}
-                <LogoMark size="md" className="flex md:hidden" />
-                <Logo size="md" className="hidden md:flex" />
+                {/* Show mark only on mobile, full logo on desktop.
+                    Each logo sits in its own wrapper div that owns the
+                    responsive display class. Do NOT put `hidden`/`flex`
+                    on the Logo itself: its root div hardcodes `inline-flex`,
+                    which beats `hidden` in the built CSS and shows both
+                    logos on mobile. */}
+                <div className="flex md:hidden">
+                  <LogoMark size="md" />
+                </div>
+                <div className="hidden md:flex">
+                  <Logo size="md" />
+                </div>
                 <span className="text-lg md:text-xl font-bold ml-2">FactVerifier</span>
               </div>
 

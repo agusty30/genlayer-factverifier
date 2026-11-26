@@ -11,21 +11,21 @@ It is backed by an **economic staking layer**: submitting a claim and challengin
 
 ## Live Deployment & Web App
 
-FactVerifier is **live on the GenLayer Bradbury testnet**, and the `frontend/` directory is a
+FactVerifier is **live on GenLayer Studio Dev**, and the `frontend/` directory is a
 real dApp whose every action is a transaction against that contract — not a demo mock.
 
 | | |
 |---|---|
-| **Network** | Bradbury testnet (chainId `4221`) |
-| **Contract** | [`0x0341797e201C1e697E89a199E6bC0e2e0bF5193a`](https://explorer-bradbury.genlayer.com/address/0x0341797e201C1e697E89a199E6bC0e2e0bF5193a) |
-| **RPC** | `https://rpc-bradbury.genlayer.com` |
-| **Explorer** | `https://explorer-bradbury.genlayer.com` |
+| **Network** | Studio Dev (chainId `61997`) |
+| **Contract** | [`0xD0C23F62660e68fF2A6D70369aF33CDE5822fe11`](https://explorer-studio-dev.genlayer.com/address/0xD0C23F62660e68fF2A6D70369aF33CDE5822fe11) |
+| **RPC** | `https://studio-dev.genlayer.com/api` |
+| **Explorer** | `https://explorer-studio-dev.genlayer.com` |
 
 **App ↔ contract flow** (see [frontend/README.md](frontend/README.md) for details):
 
 1. **Submit** — the UI validates the claim + 2–5 sources client-side (mirroring the
    contract's own checks), then calls `submit_claim(...)` with the stake sent as the payable
-   `value`. genlayer-js signs it through the user's MetaMask on Bradbury.
+   `value`. genlayer-js signs it through the user's MetaMask on Studio Dev.
 2. **Read** — `get_stats`, `get_claim`, and `get_stake_info` are read live and rendered as the
    stats bar, claims table, per-source analysis, and settlement state.
 3. **Dispute / Finalize / Withdraw** — `dispute_claim` (payable), `finalize_claim`, and
@@ -35,10 +35,12 @@ real dApp whose every action is a transaction against that contract — not a de
 ```bash
 cd frontend
 npm install
-npm run dev        # http://localhost:3000 — connect MetaMask on Bradbury
+npm run dev        # http://localhost:3000 — connect MetaMask on Studio Dev
 ```
 
-Reads work with no wallet; writes require MetaMask on Bradbury and a little GEN for stake + fees.
+Reads work with no wallet; writes require MetaMask on Studio Dev and a little GEN for stake + fees.
+
+> **Pay-per-verdict API (x402):** the same contract is also reachable without a wallet. `GET /api/verify` on the live app returns a GenLayer verdict for $0.10 USDC on Base Sepolia. See [SKILL.md](SKILL.md) and [scripts/x402-demo-client.mjs](scripts/x402-demo-client.mjs).
 
 > **Deploy the web app:** it runs on [Railway](https://railway.com) with zero config — the repo
 > ships `railway.json` and `.nvmrc`, and the root scripts drive the build. Point the Railway

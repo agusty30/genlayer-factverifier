@@ -2,7 +2,7 @@
 
 Next.js dApp for **FactVerifier**, a cross-source fact-verification oracle built as a
 GenLayer Intelligent Contract. Every user action is a live transaction against the
-deployed contract on **Bradbury testnet**:
+deployed contract on **GenLayer Studio Dev**:
 
 - **Submit** a factual claim with 2–5 source URLs and a GEN stake. The contract fetches
   each source and runs per-source LLM analysis under the equivalence principle, recording
@@ -15,7 +15,7 @@ deployed contract on **Bradbury testnet**:
 - **Finalize** an unchallenged claim (submitter only) and **withdraw** your balance
   (pull-payment).
 
-Live contract: [`0x0341797e201C1e697E89a199E6bC0e2e0bF5193a`](https://explorer-bradbury.genlayer.com/address/0x0341797e201C1e697E89a199E6bC0e2e0bF5193a)
+Live contract: [`0xD0C23F62660e68fF2A6D70369aF33CDE5822fe11`](https://explorer-studio-dev.genlayer.com/address/0xD0C23F62660e68fF2A6D70369aF33CDE5822fe11)
 
 ## Setup
 
@@ -25,7 +25,7 @@ Live contract: [`0x0341797e201C1e697E89a199E6bC0e2e0bF5193a`](https://explorer-b
 npm install
 ```
 
-2. Configure environment variables. The defaults already point at the live Bradbury
+2. Configure environment variables. The defaults already point at the live Studio Dev
    deployment, so this step is optional:
 
 ```bash
@@ -33,8 +33,8 @@ cp .env.example .env.local
 ```
 
    - `NEXT_PUBLIC_CONTRACT_ADDRESS` — FactVerifier contract address (defaults to the live one)
-   - `NEXT_PUBLIC_GENLAYER_RPC_URL` — GenLayer RPC (default: `https://rpc-bradbury.genlayer.com`)
-   - `NEXT_PUBLIC_GENLAYER_CHAIN_ID` — chain id (default: `4221`)
+   - `NEXT_PUBLIC_GENLAYER_RPC_URL` — GenLayer RPC (default: `https://studio-dev.genlayer.com/api`)
+   - `NEXT_PUBLIC_GENLAYER_CHAIN_ID` — chain id (default: `61997`)
    - `NEXT_PUBLIC_GENLAYER_EXPLORER_URL` — block explorer base URL
 
    To develop against a local Studio instead, set the RPC URL and chain id to your Studio node.
@@ -46,7 +46,7 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Reads work with no wallet; submitting,
-disputing, finalizing, and withdrawing require MetaMask connected to Bradbury and a little
+disputing, finalizing, and withdrawing require MetaMask connected to Studio Dev and a little
 GEN for stake and fees.
 
 ## Build
@@ -69,7 +69,7 @@ Node version, so there's effectively nothing to configure.
    needs the lockfile that only exists at the root.
 3. Build and start commands are read from `railway.json` (`npm run build` / `npm run start`),
    and Node 22 from `.nvmrc`.
-4. **Variables (optional):** every `NEXT_PUBLIC_*` value defaults to the live Bradbury
+4. **Variables (optional):** every `NEXT_PUBLIC_*` value defaults to the live Studio Dev
    deployment, so it runs with none set. To override, copy keys from `.env.example`. They are
    inlined at **build** time, so set them before the first deploy, not after.
 5. Deploy. Railway serves the app over HTTPS (which wallets require to inject) and routes its
@@ -91,7 +91,7 @@ Node version, so there's effectively nothing to configure.
 ## How the frontend talks to GenLayer
 
 - `lib/genlayer/client.ts` — network config + MetaMask helpers; resolves the genlayer-js
-  chain for Bradbury (env-driven).
+  chain for Studio Dev (env-driven).
 - `lib/contracts/FactVerifier.ts` — typed contract wrapper. Reads decode genlayer-js `Map`
   results into plain objects; writes send the stake as the payable `value` and poll the
   receipt with `waitForTransactionReceipt`.
@@ -109,4 +109,4 @@ Node version, so there's effectively nothing to configure.
   rows expand to full per-source analysis and settlement state.
 - **Dispute / finalize / withdraw** flows with fee-preset selection (low / standard / high).
 - **Live stats** — total claims, verified, refuted, disputes, staked GEN, treasury.
-- **Explorer links** for the contract, submitters, and winners on Bradbury.
+- **Explorer links** for the contract, submitters, and winners on Studio Dev.

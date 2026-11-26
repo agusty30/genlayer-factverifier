@@ -24,7 +24,7 @@ export default function HomePage() {
           {/* Hero Section */}
           <div className="text-center animate-fade-in">
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4">
-              <span className="gradient-purple-pink bg-clip-text text-transparent">
+              <span className="text-gradient-purple-pink">
                 FactVerifier
               </span>
             </h1>
@@ -112,7 +112,7 @@ export default function HomePage() {
                 rel="noopener noreferrer"
                 className="hover:text-accent transition-colors font-mono text-xs"
               >
-                Contract on Bradbury explorer ↗
+                Contract on Studio Dev explorer ↗
               </a>
             )}
             <a

@@ -7,23 +7,23 @@ import { createWalletClient, custom, type WalletClient } from "viem";
 /**
  * GenLayer network configuration.
  *
- * Defaults target the **Bradbury testnet** (where the FactVerifier contract is
+ * Defaults target **GenLayer Studio Dev** (chain 61997, where the FactVerifier contract is
  * deployed), but every value is overridable via NEXT_PUBLIC_* env vars, so the
  * same build can point at a local Studio by editing `.env.local`.
  */
 export const GENLAYER_CHAIN_ID = parseInt(
-  process.env.NEXT_PUBLIC_GENLAYER_CHAIN_ID || "4221"
+  process.env.NEXT_PUBLIC_GENLAYER_CHAIN_ID || "61997"
 );
 export const GENLAYER_CHAIN_ID_HEX = `0x${GENLAYER_CHAIN_ID.toString(16).toUpperCase()}`;
 
 export const GENLAYER_EXPLORER_URL =
   process.env.NEXT_PUBLIC_GENLAYER_EXPLORER_URL ||
-  "https://explorer-bradbury.genlayer.com";
+  "https://explorer-studio-dev.genlayer.com";
 
 export const GENLAYER_NETWORK = {
   chainId: GENLAYER_CHAIN_ID_HEX,
   chainName:
-    process.env.NEXT_PUBLIC_GENLAYER_CHAIN_NAME || "GenLayer Bradbury Testnet",
+    process.env.NEXT_PUBLIC_GENLAYER_CHAIN_NAME || "GenLayer Studio Dev",
   nativeCurrency: {
     name: process.env.NEXT_PUBLIC_GENLAYER_SYMBOL || "GEN",
     symbol: process.env.NEXT_PUBLIC_GENLAYER_SYMBOL || "GEN",
@@ -31,7 +31,7 @@ export const GENLAYER_NETWORK = {
   },
   rpcUrls: [
     process.env.NEXT_PUBLIC_GENLAYER_RPC_URL ||
-      "https://rpc-bradbury.genlayer.com",
+      "https://studio-dev.genlayer.com/api",
   ],
   blockExplorerUrls: GENLAYER_EXPLORER_URL ? [GENLAYER_EXPLORER_URL] : [],
 };
@@ -143,25 +143,25 @@ declare global {
 }
 
 /**
- * Get the GenLayer RPC URL from environment variables (defaults to Bradbury).
+ * Get the GenLayer RPC URL from environment variables (defaults to Studio Dev).
  */
 export function getStudioUrl(): string {
   return (
     process.env.NEXT_PUBLIC_GENLAYER_RPC_URL ||
-    "https://rpc-bradbury.genlayer.com"
+    "https://studio-dev.genlayer.com/api"
   );
 }
 
 /**
  * Get the FactVerifier contract address.
  *
- * Defaults to the live Bradbury deployment so the app works out of the box;
+ * Defaults to the live Studio Dev deployment so the app works out of the box;
  * override with NEXT_PUBLIC_CONTRACT_ADDRESS to point at another deployment.
  */
 export function getContractAddress(): string {
   return (
     process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ||
-    "0x0341797e201C1e697E89a199E6bC0e2e0bF5193a"
+    "0xD0C23F62660e68fF2A6D70369aF33CDE5822fe11"
   );
 }
 

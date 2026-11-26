@@ -227,6 +227,20 @@
     background: linear-gradient(135deg, oklch(0.65 0.22 300) 0%, oklch(0.78 0.18 330) 100%);
   }
 
+  /* Gradient text (hero title). The -webkit- prefix is REQUIRED: Tailwind
+     v4's bg-clip-text only emits the unprefixed `background-clip: text`,
+     which some mobile browsers ignore, leaving a solid gradient box with
+     transparent (invisible) text. Never use `gradient-purple-pink
+     bg-clip-text text-transparent` for text; use this class instead. */
+  .text-gradient-purple-pink {
+    display: inline-block;
+    background: linear-gradient(135deg, oklch(0.65 0.22 300) 0%, oklch(0.78 0.18 330) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
   .gradient-purple-blue {
     background: linear-gradient(135deg, oklch(0.65 0.22 300) 0%, oklch(0.55 0.37 265) 100%);
   }
